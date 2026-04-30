@@ -232,11 +232,19 @@ def _mark_lazy_loaded(name: str) -> None:
     """Update warmup_state to ``ready`` after a successful lazy load.
     Called from the lazy-load helpers so /health reflects truth even
     when the user passed --skip-warmup or warmup itself failed and
-    the endpoint subsequently lazy-loaded its model on first use."""
+    the endpoint subsequently lazy-loaded its model on first use.
+
+    Skip the transition while warmup is mid-flight (state ==
+    "downloading") — the warmup thread loads sub-components in order
+    (e.g. whisperx model first, then the aligner), and a premature
+    "ready" here would make /health claim readiness before the
+    aligner finishes downloading. The warmup thread sets the final
+    "ready" state itself."""
     with warmup_state_lock:
         current = warmup_state.get(name)
-    if current != "ready":
-        _set_warmup_state(name, "ready")
+    if current in ("ready", "downloading"):
+        return
+    _set_warmup_state(name, "ready")
 
 
 def _get_whisperx_model():
@@ -416,7 +424,11 @@ async def align_lyrics(
             if language:
                 transcribe_kwargs["language"] = language.lower()
             transcribed = asr_model.transcribe(audio, **transcribe_kwargs)
-            detected_lang = (transcribed.get("language") or language or "en").lower()
+            # Caller's explicit hint takes precedence — Whisper's auto-
+            # detection can mis-classify on short clips, instrumental
+            # intros, or non-English vocals, which would then load the
+            # wrong wav2vec2 aligner.
+            detected_lang = (language or transcribed.get("language") or "en").lower()
             raw_speech_segments = transcribed.get("segments", []) or []
 
             # Drop tiny / zero-duration segments — wav2vec2 align tends
@@ -845,6 +857,14 @@ async def pitch_extract(
         for entry in token_list:
             if not isinstance(entry, dict) or "t" not in entry or "d" not in entry:
                 raise ValueError("each lyric entry needs 't' and 'd'")
+            # Numeric type-check at the boundary so a malformed payload
+            # (e.g. {"t": "abc"}) returns a clean 400 instead of a 500
+            # from the worker thread when float() blows up.
+            try:
+                float(entry["t"])
+                float(entry["d"])
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"'t' and 'd' must be numeric ({exc})")
     except (json.JSONDecodeError, ValueError) as exc:
         return JSONResponse({"error": f"invalid lyrics payload: {exc}"}, 400)
 
