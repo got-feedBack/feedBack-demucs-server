@@ -215,14 +215,17 @@ _whisperx_aligners: dict[str, tuple] = {}
 _whisperx_aligners_lock = threading.Lock()
 
 
+def _whisperx_device() -> str:
+    return _device or ("cuda" if _gpu_available else "cpu")
+
+
 def _whisperx_compute_type() -> str:
     # faster-whisper / CTranslate2 picks compute_type per-device. CUDA
     # benefits from float16; CPU only supports int8/float32 reliably.
-    return "float16" if (_device == "cuda" or _gpu_available) else "int8"
-
-
-def _whisperx_device() -> str:
-    return _device or ("cuda" if _gpu_available else "cpu")
+    # Key off the effective runtime device (which may be forced to "cpu"
+    # via --device on a CUDA-capable host) — keying off _gpu_available
+    # would pick float16 on CPU and crash faster-whisper at load time.
+    return "float16" if _whisperx_device() == "cuda" else "int8"
 
 
 def _get_whisperx_model():
@@ -350,36 +353,71 @@ async def align_lyrics(
 
     def _do_align():
         try:
-            lang = language if language else "en"
-            asr_model = _get_whisperx_model()
+            clean_text = (text or "").strip()
+            if not clean_text:
+                return {"error": "lyrics text is empty"}
 
             # WhisperX expects a numpy float32 mono 16k array for both
             # transcription and alignment. load_audio handles the
             # resample / mono conversion identically to its internals.
             audio = whisperx.load_audio(tmp.name)
+            audio_duration = float(len(audio)) / 16000.0
+            if audio_duration <= 0:
+                return {"error": "audio is empty"}
 
-            # Transcribe to get rough segment-level text + boundaries.
-            # We still pass the user's `text` via the post-align step
-            # below — WhisperX doesn't support pure forced-alignment of
-            # arbitrary text the way stable-ts did, so the pipeline is
-            # transcribe → wav2vec2-align. The alignment honours the
-            # transcribed segments' word ordering, which for sung
-            # vocals matches the user-supplied lyrics closely enough
-            # in practice. Callers wanting strict text-locked alignment
-            # should split the audio per line first.
-            transcribe_kwargs = {"batch_size": 16}
-            if lang:
-                transcribe_kwargs["language"] = lang
-            transcribed = asr_model.transcribe(audio, **transcribe_kwargs)
-            detected_lang = transcribed.get("language", lang) or "en"
+            # Resolve language — used only to pick the wav2vec2 aligner.
+            # If the caller didn't hint, run a short Whisper sample for
+            # detection; full transcription is intentionally NOT used
+            # because the contract is forced alignment of caller-supplied
+            # text, not transcription of the audio.
+            detected_lang = (language or "").lower().strip()
+            if not detected_lang:
+                try:
+                    asr_model = _get_whisperx_model()
+                    sample = audio[: min(len(audio), 30 * 16000)]
+                    detected = asr_model.transcribe(sample, batch_size=16)
+                    detected_lang = (detected.get("language") or "en").lower()
+                except Exception:
+                    detected_lang = "en"
 
-            # Run the wav2vec2 forced aligner. char alignments are only
-            # produced when the caller asked for `phoneme` granularity —
-            # they roughly double the response size, so don't ship them
-            # unless needed.
+            # Forced alignment of caller-supplied text. Split user text
+            # into lines, give each line a [start, end] window scaled by
+            # character count as the initial guess, then let wav2vec2
+            # Viterbi-decode the optimal char-to-frame mapping inside
+            # each window. wav2vec2 finds the best path within each
+            # segment's window, so the proportional time guess just
+            # needs to be reasonable — it doesn't need to be exact.
+            #
+            # Per-line segmentation also gives us free `new_line` markers
+            # downstream: the first word in each aligned segment came
+            # from the start of a user-text line.
+            #
+            # Trade-off: for songs with long instrumental gaps between
+            # lines, the proportional initial guess can land a line's
+            # window over silence, producing slack word boundaries. For
+            # typical continuous-vocal clips (vocal stems from demucs),
+            # this is fine. Improving this further would require a VAD
+            # pass to seed the per-line windows from speech regions.
+            lines = [ln.strip() for ln in clean_text.split("\n") if ln.strip()]
+            if not lines:
+                return {"error": "lyrics text is empty"}
+
+            total_chars = sum(len(ln) for ln in lines) or 1
+            custom_segments: list[dict] = []
+            cursor = 0.0
+            for ln in lines:
+                seg_dur = audio_duration * (len(ln) / total_chars)
+                end = min(cursor + seg_dur, audio_duration)
+                custom_segments.append({
+                    "start": round(cursor, 3),
+                    "end": round(end, 3),
+                    "text": ln,
+                })
+                cursor = end
+
             aligner_model, aligner_meta = _get_whisperx_aligner(detected_lang)
             aligned = whisperx.align(
-                transcribed["segments"],
+                custom_segments,
                 aligner_model,
                 aligner_meta,
                 audio,
