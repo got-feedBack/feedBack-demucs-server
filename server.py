@@ -277,7 +277,12 @@ def _get_whisperx_model():
                     device=_whisperx_device(),
                     compute_type=_whisperx_compute_type(),
                 )
-    _mark_lazy_loaded("whisperx")
+    # Intentionally do NOT mark warmup ready here. /align needs both the
+    # ASR model AND a wav2vec2 aligner to function — if the aligner load
+    # fails (unsupported language, transient network), /align would still
+    # 500 while /health.warmup.whisperx claimed "ready". The aligner
+    # helper marks ready only after a successful aligner load, which is
+    # the true gate for subsystem readiness.
     return _whisperx_model
 
 
@@ -704,6 +709,23 @@ async def align_lyrics(
                             float(bucket[0]["start"]),
                             float(bucket[-1]["end"]),
                         )
+
+                # If alignment produced zero usable timings for ANY line,
+                # there's no anchor to interpolate from — every "estimate"
+                # would be fabricated 0..audio_duration nonsense. That's
+                # plausible-looking but unusable data; surface a real
+                # error instead. Possible causes: vocals stem is silent
+                # / pure noise, alignment language mismatch, audio
+                # corruption. Caller can retry with a different language
+                # hint or a cleaner stem.
+                if not any(lt is not None for lt in line_times):
+                    return {
+                        "error": (
+                            "wav2vec2 alignment produced no word timestamps "
+                            "— vocals stem may be silent, language mismatched, "
+                            "or audio unreadable"
+                        )
+                    }
 
                 # Fill missing lines by interpolating between known
                 # neighbours: previous line's end → next line's start.
