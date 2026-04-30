@@ -50,11 +50,14 @@ def _download_only() -> int:
     parser.add_argument("-d", "--device", default="cpu")
     args, _unknown = parser.parse_known_args()
 
-    # demucs.api.Separator triggers the model download on construction.
-    # Importing demucs.api works on demucs >= 4.0.0.
-    from demucs.api import Separator
-    print(f"[run_demucs] Pre-downloading {args.name} weights to {args.device}...", flush=True)
-    Separator(model=args.name, device=args.device)
+    # demucs.pretrained.get_model() is the stable cross-version API on
+    # demucs >= 4.0.0; it triggers the torch.hub weights download to
+    # the standard cache and returns the loaded model object. Don't
+    # use demucs.api.Separator — that module is missing in some
+    # demucs 4.0.x wheels.
+    from demucs.pretrained import get_model
+    print(f"[run_demucs] Pre-downloading {args.name} weights...", flush=True)
+    get_model(args.name)
     print(f"[run_demucs] {args.name} ready.", flush=True)
     return 0
 

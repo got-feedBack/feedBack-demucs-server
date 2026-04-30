@@ -93,7 +93,11 @@ progress in the terminal or in `journalctl -u slopsmith-demucs --follow`.
   "warmup": {
     "demucs": "ready",
     "whisperx": "downloading",
-    "crepe": "pending"
+    "crepe": "pending",
+    "whisperx_aligners": {
+      "en": "ready",
+      "es": "downloading"
+    }
   }
 }
 ```
@@ -103,6 +107,13 @@ Subsequent restarts use the cached weights and reach `ready` within
 a couple of seconds. Pass `--skip-warmup` if you need to start the
 server in an environment without internet access; per-endpoint calls
 will lazy-download on demand instead.
+
+The top-level `whisperx` field reflects the warmup contract — ASR
+model + English wav2vec2 aligner. Other languages aren't pre-warmed
+(we don't know which ones a client will use) and download on the
+first `/align` request in that language. The `whisperx_aligners` map
+exposes per-language aligner state so multilingual clients can poll
+for their language's readiness before issuing a real `/align` call.
 
 ### Run as a systemd service
 

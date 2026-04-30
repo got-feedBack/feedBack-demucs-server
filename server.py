@@ -88,6 +88,15 @@ warmup_state: dict[str, str] = {
 }
 warmup_state_lock = threading.Lock()
 
+# Per-language wav2vec2 aligner state. The top-level "whisperx" entry
+# above tracks the warmup contract (ASR + en aligner). This dict tells
+# clients which other-language aligners are currently loaded so non-
+# English /align callers can poll for their own language's readiness.
+# The first /align in a language flips its entry from "downloading"
+# (transient) to "ready"; failures land as "failed: <reason>".
+warmup_aligners: dict[str, str] = {}
+warmup_aligners_lock = threading.Lock()
+
 
 def _set_warmup_state(name: str, value: str) -> None:
     with warmup_state_lock:
@@ -95,6 +104,12 @@ def _set_warmup_state(name: str, value: str) -> None:
     # Print on every transition so the systemd journal carries a
     # readable trace alongside the per-library tqdm bars.
     print(f"[warmup] {name}: {value}", flush=True)
+
+
+def _set_aligner_state(language: str, value: str) -> None:
+    with warmup_aligners_lock:
+        warmup_aligners[language] = value
+    print(f"[warmup] whisperx aligner ({language}): {value}", flush=True)
 
 
 # ── Auth middleware ─────────────────────────────────────────────────────
@@ -114,6 +129,14 @@ async def check_api_key(request, call_next):
 def health():
     with warmup_state_lock:
         warmup = dict(warmup_state)
+    with warmup_aligners_lock:
+        aligners = dict(warmup_aligners)
+    # Surface per-language aligner state alongside the top-level
+    # whisperx field. The top-level value reflects the warmup contract
+    # (ASR + en aligner ready); the aligners dict shows which other
+    # languages have been loaded so non-English /align callers can
+    # poll for their own language before issuing a real request.
+    warmup["whisperx_aligners"] = aligners
     return {
         "status": "ok",
         "demucs_model": _model,
@@ -315,12 +338,22 @@ def _get_whisperx_aligner(language: str):
         if cached is not None:
             _mark_lazy_loaded("whisperx")
             return cached
-        pair = whisperx.load_align_model(
-            language_code=lang,
-            device=_whisperx_device(),
-        )
+        # Surface per-language download progress on /health so non-
+        # English /align callers can poll for their language's
+        # readiness instead of waiting blind for the first request to
+        # stall on a CDN fetch.
+        _set_aligner_state(lang, "downloading")
+        try:
+            pair = whisperx.load_align_model(
+                language_code=lang,
+                device=_whisperx_device(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            _set_aligner_state(lang, f"failed: {exc}")
+            raise
         with _whisperx_aligners_lock:
             _whisperx_aligners[lang] = pair
+        _set_aligner_state(lang, "ready")
 
     _mark_lazy_loaded("whisperx")
     return pair
