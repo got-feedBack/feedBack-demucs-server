@@ -365,55 +365,59 @@ async def align_lyrics(
             if audio_duration <= 0:
                 return {"error": "audio is empty"}
 
+            lines = [ln.strip() for ln in clean_text.splitlines() if ln.strip()]
+            if not lines:
+                return {"error": "lyrics text is empty"}
+
+            # Build a flat word list with a parallel word→line index
+            # array so we can recover new_line markers after alignment.
+            flat_words: list[str] = []
+            word_to_line: list[int] = []
+            for line_idx, ln in enumerate(lines):
+                for w in ln.split():
+                    flat_words.append(w)
+                    word_to_line.append(line_idx)
+            if not flat_words:
+                return {"error": "lyrics text contains no words"}
+
             # Resolve language — used only to pick the wav2vec2 aligner.
-            # If the caller didn't hint, run a short Whisper sample for
-            # detection; full transcription is intentionally NOT used
-            # because the contract is forced alignment of caller-supplied
-            # text, not transcription of the audio.
+            # Whisper transcription text is intentionally discarded; the
+            # contract is forced alignment of caller-supplied text. We
+            # sample the middle 60s of the audio rather than the first
+            # 30s so songs with long instrumental intros / late-starting
+            # vocals still detect reliably.
             detected_lang = (language or "").lower().strip()
             if not detected_lang:
                 try:
                     asr_model = _get_whisperx_model()
-                    sample = audio[: min(len(audio), 30 * 16000)]
+                    window_s = min(60.0, audio_duration)
+                    mid = audio_duration / 2.0
+                    start_s = max(0.0, mid - window_s / 2.0)
+                    end_s = min(audio_duration, mid + window_s / 2.0)
+                    s_idx = int(start_s * 16000)
+                    e_idx = int(end_s * 16000)
+                    sample = audio[s_idx:e_idx] if e_idx > s_idx else audio
                     detected = asr_model.transcribe(sample, batch_size=16)
                     detected_lang = (detected.get("language") or "en").lower()
                 except Exception:
                     detected_lang = "en"
 
-            # Forced alignment of caller-supplied text. Split user text
-            # into lines, give each line a [start, end] window scaled by
-            # character count as the initial guess, then let wav2vec2
-            # Viterbi-decode the optimal char-to-frame mapping inside
-            # each window. wav2vec2 finds the best path within each
-            # segment's window, so the proportional time guess just
-            # needs to be reasonable — it doesn't need to be exact.
+            # Forced alignment with a single segment spanning the whole
+            # audio. wav2vec2 Viterbi-decodes the optimal char-to-frame
+            # mapping globally, which is robust to long instrumental
+            # intros, mid-song breaks, and uneven line pacing — none of
+            # those constrain where individual words can land. (Per-line
+            # windows would force each line into a hard time slice and
+            # break exactly those cases.)
             #
-            # Per-line segmentation also gives us free `new_line` markers
-            # downstream: the first word in each aligned segment came
-            # from the start of a user-text line.
-            #
-            # Trade-off: for songs with long instrumental gaps between
-            # lines, the proportional initial guess can land a line's
-            # window over silence, producing slack word boundaries. For
-            # typical continuous-vocal clips (vocal stems from demucs),
-            # this is fine. Improving this further would require a VAD
-            # pass to seed the per-line windows from speech regions.
-            lines = [ln.strip() for ln in clean_text.split("\n") if ln.strip()]
-            if not lines:
-                return {"error": "lyrics text is empty"}
-
-            total_chars = sum(len(ln) for ln in lines) or 1
-            custom_segments: list[dict] = []
-            cursor = 0.0
-            for ln in lines:
-                seg_dur = audio_duration * (len(ln) / total_chars)
-                end = min(cursor + seg_dur, audio_duration)
-                custom_segments.append({
-                    "start": round(cursor, 3),
-                    "end": round(end, 3),
-                    "text": ln,
-                })
-                cursor = end
+            # new_line markers are recovered after alignment by matching
+            # aligned word output to the parallel word_to_line array
+            # built above.
+            custom_segments = [{
+                "start": 0.0,
+                "end": float(audio_duration),
+                "text": " ".join(flat_words),
+            }]
 
             aligner_model, aligner_meta = _get_whisperx_aligner(detected_lang)
             aligned = whisperx.align(
@@ -446,25 +450,59 @@ async def align_lyrics(
                             "phoneme": True,
                         })
             elif want_word:
-                # Per-word entries with new_line markers at segment
-                # boundaries so clients can reflow into lines.
+                # Single-segment alignment, so collect aligned words
+                # across whatever segments WhisperX produced internally
+                # (it may chunk long inputs). Match each aligned word
+                # back to its source line via the parallel word_to_line
+                # array so we can emit new_line markers at line
+                # boundaries.
+                aligned_words: list[dict] = []
                 for seg in aligned_segments:
-                    first = True
                     for w in seg.get("words", []) or []:
-                        ws = w.get("start")
-                        we = w.get("end")
-                        wt = (w.get("word") or "").strip()
-                        if ws is None or we is None or not wt:
+                        if w.get("start") is None or w.get("end") is None:
                             continue
-                        entry = {
-                            "start": round(float(ws), 3),
-                            "end": round(float(we), 3),
-                            "text": wt,
-                        }
-                        if first:
-                            entry["new_line"] = True
-                            first = False
-                        segments_out.append(entry)
+                        wt = (w.get("word") or "").strip()
+                        if not wt:
+                            continue
+                        aligned_words.append(w)
+
+                # If the aligned word count matches the input flat_words
+                # count we can map positionally with confidence. If they
+                # diverge (whisperx may merge/split occasionally), fall
+                # back to a textual walk: advance the input cursor each
+                # time the output text matches the next input word.
+                # If even that fails, omit new_line markers rather than
+                # placing them incorrectly.
+                line_for_aligned: list[int | None] = [None] * len(aligned_words)
+                if len(aligned_words) == len(word_to_line):
+                    line_for_aligned = list(word_to_line)
+                else:
+                    cursor_in = 0
+                    for i, w in enumerate(aligned_words):
+                        if cursor_in >= len(flat_words):
+                            break
+                        wt = (w.get("word") or "").strip().lower()
+                        target = flat_words[cursor_in].lower()
+                        # Strip trailing punctuation on either side so
+                        # "love," and "love" still match.
+                        wt_norm = wt.rstrip(".,!?;:\"'-")
+                        target_norm = target.rstrip(".,!?;:\"'-")
+                        if wt_norm == target_norm or target_norm.startswith(wt_norm) or wt_norm.startswith(target_norm):
+                            line_for_aligned[i] = word_to_line[cursor_in]
+                            cursor_in += 1
+
+                prev_line = -1
+                for i, w in enumerate(aligned_words):
+                    entry = {
+                        "start": round(float(w["start"]), 3),
+                        "end": round(float(w["end"]), 3),
+                        "text": (w.get("word") or "").strip(),
+                    }
+                    line_idx = line_for_aligned[i]
+                    if line_idx is not None and line_idx != prev_line:
+                        entry["new_line"] = True
+                        prev_line = line_idx
+                    segments_out.append(entry)
 
                 if granularity == "syllable":
                     lang_code = detected_lang
@@ -477,18 +515,52 @@ async def align_lyrics(
                         syllable_segs.extend(syls)
                     segments_out = syllable_segs
             else:
+                # Line granularity: aggregate aligned words back into
+                # their source user-text lines so each output segment
+                # is one input line with refined start/end timestamps.
+                aligned_words = []
                 for seg in aligned_segments:
-                    seg_text = (seg.get("text") or "").strip()
-                    if not seg_text:
+                    for w in seg.get("words", []) or []:
+                        if w.get("start") is None or w.get("end") is None:
+                            continue
+                        if not (w.get("word") or "").strip():
+                            continue
+                        aligned_words.append(w)
+
+                # Same positional vs textual fallback as the word path.
+                line_for_aligned = [None] * len(aligned_words)
+                if len(aligned_words) == len(word_to_line):
+                    line_for_aligned = list(word_to_line)
+                else:
+                    cursor_in = 0
+                    for i, w in enumerate(aligned_words):
+                        if cursor_in >= len(flat_words):
+                            break
+                        wt = (w.get("word") or "").strip().lower().rstrip(".,!?;:\"'-")
+                        target = flat_words[cursor_in].lower().rstrip(".,!?;:\"'-")
+                        if wt == target or target.startswith(wt) or wt.startswith(target):
+                            line_for_aligned[i] = word_to_line[cursor_in]
+                            cursor_in += 1
+
+                line_buckets: dict[int, list] = {}
+                for i, w in enumerate(aligned_words):
+                    li = line_for_aligned[i]
+                    if li is None:
                         continue
-                    seg_start = seg.get("start")
-                    seg_end = seg.get("end")
-                    if seg_start is None or seg_end is None:
+                    line_buckets.setdefault(li, []).append(w)
+
+                for line_idx, ln in enumerate(lines):
+                    bucket = line_buckets.get(line_idx, [])
+                    if not bucket:
+                        # No words landed in this line — emit nothing
+                        # rather than a zero-duration entry.
                         continue
+                    seg_start = float(bucket[0]["start"])
+                    seg_end = float(bucket[-1]["end"])
                     segments_out.append({
-                        "start": round(float(seg_start), 3),
-                        "end": round(float(seg_end), 3),
-                        "text": seg_text,
+                        "start": round(seg_start, 3),
+                        "end": round(seg_end, 3),
+                        "text": ln,
                     })
 
             return {"segments": segments_out, "language": detected_lang}
