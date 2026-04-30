@@ -160,7 +160,7 @@ Forced-align lyrics against audio using WhisperX (faster-whisper transcription +
 |-----------|------|-------------|
 | `file` | Form (file) | Audio file (vocals stem) |
 | `text` | Form | Plain text lyrics |
-| `language` | Form | ISO language code hint (optional, auto-detected) |
+| `language` | Form | ISO 639-1/2 language code hint, e.g. `en`, `es`, `pt` (optional, auto-detected). Must be 2–8 lowercase letters; subtags like `en-US` are not supported. |
 | `granularity` | Form | `line` (default), `word`, `syllable`, or `phoneme` |
 
 Granularity behaviour:

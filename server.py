@@ -257,7 +257,7 @@ _whisperx_model_name = "medium"
 # accumulating dozens of ~1 GB wav2vec2 aligners would OOM. Bounded
 # by MAX_WHISPERX_ALIGNERS; the least-recently-used aligner is evicted
 # when the cap is exceeded.
-MAX_WHISPERX_ALIGNERS = int(os.environ.get("SLOPSMITH_MAX_WHISPERX_ALIGNERS", "4"))
+MAX_WHISPERX_ALIGNERS = max(1, int(os.environ.get("SLOPSMITH_MAX_WHISPERX_ALIGNERS", "4")))
 _whisperx_aligners: OrderedDict[str, tuple] = OrderedDict()
 _whisperx_aligners_lock = threading.Lock()
 # Per-language locks so a /align call for language A doesn't block a
@@ -818,7 +818,8 @@ async def align_lyrics(
                                 "wav2vec2 alignment produced no word "
                                 "timestamps — vocals stem may be silent, "
                                 "language mismatched, or audio unreadable"
-                            )
+                            ),
+                            "_http_status": 400,
                         }
                     # Word-mapping fell through; spread the available
                     # aligned word timestamps across user lines by

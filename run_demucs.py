@@ -51,9 +51,11 @@ def _download_only() -> int:
 
     # demucs.pretrained.get_model() is the stable cross-version API on
     # demucs >= 4.0.0; it triggers the torch.hub weights download to
-    # the standard cache and returns the loaded model object. Don't
-    # use demucs.api.Separator — that module is missing in some
-    # demucs 4.0.x wheels.
+    # the standard cache and returns the loaded model object.
+    # Note: demucs.api.Separator is intentionally avoided — that module
+    # is absent in some demucs 4.0.x wheels, so get_model() is used
+    # here for maximum compatibility while still exercising the same
+    # torch.hub download path used by real /separate jobs.
     from demucs.pretrained import get_model
     print(f"[run_demucs] Pre-downloading {args.name} weights...", flush=True)
     get_model(args.name)
