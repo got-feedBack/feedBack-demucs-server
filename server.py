@@ -12,6 +12,15 @@ Usage:
 import argparse
 import hashlib
 import os
+
+# Reduce CUDA allocator fragmentation when this server hosts multiple
+# heavy models (demucs + Whisper-medium + wav2vec2 aligner + CREPE)
+# that share GPU memory. With expandable_segments the allocator can
+# resize blocks instead of leaving reserved-but-unused fragments;
+# without it, /pitch reliably OOMs on ≤10 GB GPUs after demucs has
+# run a separation. Set BEFORE `import torch` so the allocator picks
+# it up at process start.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 import re
 import shutil
 import subprocess
@@ -1023,8 +1032,23 @@ def _extract_pitch_with_crepe(audio_path: Path, lyrics: list[dict]) -> list[dict
     fmax = float(librosa.note_to_hz("C6"))
     device = _crepe_device()
 
+    # Reclaim any CUDA memory torch was holding but not actively using
+    # before kicking off CREPE. demucs + Whisper-medium + wav2vec2 +
+    # CREPE together can pin ~7-8 GB on GPUs with ≤10 GB; without
+    # empty_cache() the previous demucs run's reserved-but-unallocated
+    # blocks fragment the heap and the next CREPE allocation hits OOM.
+    if device.startswith("cuda"):
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+
     # CREPE's `full` model is the most accurate; `tiny` is the fastest.
     # `full` is fine on CPU at 16 kHz for ~5 min songs (~1-2× realtime).
+    # batch_size scales peak GPU memory linearly — at 2048 a 4-minute
+    # song needs ~2 GB just for the CREPE batch activations, which OOMs
+    # on a 10 GB GPU sharing with Whisper + demucs. 256 is plenty fast
+    # and ~8× cheaper on memory.
     f0, periodicity = torchcrepe.predict(
         audio,
         sr,
@@ -1032,7 +1056,7 @@ def _extract_pitch_with_crepe(audio_path: Path, lyrics: list[dict]) -> list[dict
         fmin,
         fmax,
         model="full",
-        batch_size=2048,
+        batch_size=256,
         device=device,
         return_periodicity=True,
     )
