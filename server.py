@@ -281,8 +281,11 @@ _whisperx_aligner_locks_guard = threading.Lock()
 
 def _get_aligner_load_lock(lang: str) -> threading.Lock:
     """Return the lock that serialises load_align_model calls for one
-    language. Created lazily; never removed (per-language locks are
-    cheap and the language set is bounded)."""
+    language. Created lazily; evicted from ``_whisperx_aligner_locks``
+    together with the aligner when the LRU cap is exceeded (so the dict
+    is bounded to MAX_WHISPERX_ALIGNERS entries). Threads already holding
+    a reference to an evicted lock object continue to hold it safely;
+    new threads for the same language will create a fresh lock."""
     with _whisperx_aligner_locks_guard:
         lock = _whisperx_aligner_locks.get(lang)
         if lock is None:
@@ -301,7 +304,8 @@ def _whisperx_compute_type() -> str:
     # Key off the effective runtime device (which may be forced to "cpu"
     # via --device on a CUDA-capable host) — keying off _gpu_available
     # would pick float16 on CPU and crash faster-whisper at load time.
-    return "float16" if _whisperx_device() == "cuda" else "int8"
+    # Use startswith("cuda") to handle device strings like "cuda:0".
+    return "float16" if _whisperx_device().startswith("cuda") else "int8"
 
 
 def _mark_lazy_loaded(name: str) -> None:
