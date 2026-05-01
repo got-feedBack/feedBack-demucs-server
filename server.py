@@ -1107,22 +1107,81 @@ def _extract_pitch_with_crepe(audio_path: Path, lyrics: list[dict]) -> list[dict
                 midi = int(unique[int(np.argmax(weights))])
         raw.append({"t": t0, "d": float(tok["d"]), "midi": midi})
 
-    # Octave-error correction against the song-wide median. Even with
-    # CREPE's lower error rate, a quiet syllable can land an octave off
-    # the surrounding melody — snap if shifting brings it closer.
-    if song_median is not None:
-        for r in raw:
-            if r["midi"] is None:
+    # Octave-error correction against LOCAL neighbours, not the song-
+    # wide median. Comparing to the median was too aggressive: any note
+    # ≥12 semitones above the median (every typical chorus high note)
+    # got folded down because the median is closer than the actual
+    # pitch — bars for legitimate high notes appeared below the
+    # surrounding melody on the chart instead of above. Real CREPE/pYIN
+    # octave errors are localised: a single note jumps off the
+    # surrounding melodic contour, while genuine high notes are
+    # accompanied by other high notes.
+    #
+    # For each token, look at the nearest confident neighbours (a few
+    # tokens before and after) and snap to a ±12 shift only when the
+    # shift brings the note meaningfully closer to that local
+    # neighbourhood. Requires a margin of ≥3 semitones improvement so
+    # legitimate jumps (a real octave leap) aren't snapped flat.
+    raw_midis: list[int | None] = [r["midi"] for r in raw]
+    NEIGHBOUR_RADIUS = 3
+    NEIGHBOUR_TIME_WINDOW_S = 5.0  # ignore neighbours separated by an instrumental gap
+    MIN_NEIGHBOURS = 2  # never snap based on a single companion
+    # Snap only when the original is *more than* a perfect octave from
+    # the neighbour median. Notes within an octave include every
+    # legitimate intra-melody jump (sixths, sevenths, the perfect
+    # octave leap itself) — touching them produces musically wrong
+    # data. Only beyond an octave is the "this is an octave error"
+    # interpretation more plausible than "this is a real leap".
+    SNAP_OUTER_BAND = 12
+    # And require the candidate to be meaningfully closer than the
+    # original — at least a tritone of improvement — so we don't
+    # snap based on noise.
+    SNAP_IMPROVEMENT = 6
+    for i, r in enumerate(raw):
+        if r["midi"] is None:
+            continue
+        t_centre = float(r["t"])
+        neighbours: list[int] = []
+        # Walk outward up to NEIGHBOUR_RADIUS in each direction, filtering
+        # by both index distance (to keep the window small) and time
+        # distance (to skip gaps where a chorus follows an instrumental
+        # break — register changes there are legitimate, not octave
+        # errors).
+        for j in range(max(0, i - NEIGHBOUR_RADIUS), i):
+            m = raw_midis[j]
+            if m is None:
                 continue
-            base = int(r["midi"])
-            best = base
-            best_dist = abs(base - song_median)
-            for shift in (-12, 12):
-                cand = base + shift
-                d = abs(cand - song_median)
-                if d < best_dist:
-                    best, best_dist = cand, d
-            r["midi"] = best
+            if abs(float(raw[j]["t"]) - t_centre) > NEIGHBOUR_TIME_WINDOW_S:
+                continue
+            neighbours.append(int(m))
+        for j in range(i + 1, min(len(raw), i + 1 + NEIGHBOUR_RADIUS)):
+            m = raw_midis[j]
+            if m is None:
+                continue
+            if abs(float(raw[j]["t"]) - t_centre) > NEIGHBOUR_TIME_WINDOW_S:
+                continue
+            neighbours.append(int(m))
+        # Need at least two neighbours: with a single companion, every
+        # ±12-semitone gap looks like an "error" and the two notes snap
+        # onto each other (e.g. a [60, 72] pair would become [72, 60]).
+        if len(neighbours) < MIN_NEIGHBOURS:
+            continue
+        local_centre = float(np.median(neighbours))
+        base = int(r["midi"])
+        base_dist = abs(base - local_centre)
+        if base_dist <= SNAP_OUTER_BAND:
+            # Within an octave of neighbours — leave it alone, this is
+            # a legitimate intra-melody interval (sixth, seventh, octave
+            # leap, etc.) not an octave error.
+            continue
+        best = base
+        best_dist = base_dist
+        for shift in (-12, 12):
+            cand = base + shift
+            d = abs(cand - local_centre)
+            if d + SNAP_IMPROVEMENT < best_dist:
+                best, best_dist = cand, d
+        r["midi"] = best
 
     # Neighbour-borrow for tokens that still have no midi (consonant
     # syllables, whispered phrases CREPE couldn't lock). Skip if the
