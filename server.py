@@ -1037,7 +1037,7 @@ def _extract_pitch_with_crepe(audio_path: Path, lyrics: list[dict]) -> list[dict
     # CREPE together can pin ~7-8 GB on GPUs with ≤10 GB; without
     # empty_cache() the previous demucs run's reserved-but-unallocated
     # blocks fragment the heap and the next CREPE allocation hits OOM.
-    if device == "cuda":
+    if device.startswith("cuda"):
         try:
             torch.cuda.empty_cache()
         except Exception:
