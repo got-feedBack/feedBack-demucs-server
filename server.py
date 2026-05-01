@@ -1122,7 +1122,6 @@ def _extract_pitch_with_crepe(audio_path: Path, lyrics: list[dict]) -> list[dict
     # shift brings the note meaningfully closer to that local
     # neighbourhood. Requires a margin of ≥6 semitones improvement so
     # legitimate jumps (a real octave leap) aren't snapped flat.
-    raw_midis: list[int | None] = [r["midi"] for r in raw]
     NEIGHBOUR_RADIUS = 3
     NEIGHBOUR_TIME_WINDOW_S = 5.0  # ignore neighbours separated by an instrumental gap
     MIN_NEIGHBOURS = 2  # never snap based on a single companion
@@ -1147,15 +1146,19 @@ def _extract_pitch_with_crepe(audio_path: Path, lyrics: list[dict]) -> list[dict
         # distance (to skip gaps where a chorus follows an instrumental
         # break — register changes there are legitimate, not octave
         # errors).
+        # Read raw[j]["midi"] directly (live values) so that corrections
+        # applied to earlier tokens are visible when evaluating later ones;
+        # consecutive octave errors can therefore propagate corrections to
+        # their neighbours instead of each bad note reinforcing the other.
         for j in range(max(0, i - NEIGHBOUR_RADIUS), i):
-            m = raw_midis[j]
+            m = raw[j]["midi"]
             if m is None:
                 continue
             if abs(float(raw[j]["t"]) - t_centre) > NEIGHBOUR_TIME_WINDOW_S:
                 continue
             neighbours.append(int(m))
         for j in range(i + 1, min(len(raw), i + 1 + NEIGHBOUR_RADIUS)):
-            m = raw_midis[j]
+            m = raw[j]["midi"]
             if m is None:
                 continue
             if abs(float(raw[j]["t"]) - t_centre) > NEIGHBOUR_TIME_WINDOW_S:
