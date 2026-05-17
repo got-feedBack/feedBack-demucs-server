@@ -2,8 +2,12 @@
 # Slopsmith Demucs Server — Docker Compose
 # ============================================================
 # Usage:
-#   docker compose up -d                    # CPU mode
-#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d   # GPU
+#   docker compose up -d          # Pull from GHCR + run (CPU)
+#   docker compose up -d          # Uncomment runtime:nvidia for GPU
+#
+# Or build directly from git (no local clone needed):
+#   docker compose build
+#   docker compose up -d
 #
 # Default listens on port 7865.
 # Auto-update checks for repo changes daily at 04:00.
@@ -11,10 +15,18 @@
 
 services:
   slopsmith-demucs:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: slopsmith-demucs
+    # ── Pre-built image from GHCR (CI builds on every push to main) ──
+    image: ghcr.io/HexRebuilt/slopsmith-demucs-server:latest
+
+    # ── OR build from git URL (no local clone needed) ──
+    # build: https://github.com/HexRebuilt/slopsmith-demucs-server.git#main
+
+    # ── OR build from local Dockerfile ──
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+
+    container_name: slopsmith-demucs-server
     restart: unless-stopped
     ports:
       - "7865:7865"
@@ -32,17 +44,16 @@ services:
       - AUTO_UPDATE=true
       - UPDATE_TIME=04:00
       - UPDATE_CHECK_INTERVAL=3600
-      # - SLOPSMITH_DEMUCS_MODEL=htdemucs_ft
+      - SLOPSMITH_DEMUCS_MODEL=htdemucs_ft
       # - SLOPSMITH_API_KEY=your-secret-key
-      # - SKIP_WARMUP=false
-    # GPU support requires nvidia-container-toolkit:
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
+      - SKIP_WARMUP=false
+
+    # ── GPU support (requires nvidia-container-toolkit) ──
+    # Uncomment the lines below for GPU acceleration:
+    # runtime: nvidia
+    # environment:
+    #   - NVIDIA_VISIBLE_DEVICES=all
+    #   - NVIDIA_DRIVER_CAPABILITIES=all
 
 volumes:
   demucs-cache:
