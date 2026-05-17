@@ -1,16 +1,17 @@
 # ============================================================
 # Slopsmith Demucs Server — Docker Compose
 # ============================================================
-# Usage:
-#   docker compose up -d          # Pull from GHCR + run (CPU)
-#   docker compose up -d          # Uncomment runtime:nvidia for GPU
+# Usage (CLI):
+#   docker compose up -d                    # Pull from GHCR + run
 #
-# Or build directly from git (no local clone needed):
+# Deploy (Portainer):
+#   Copy this file into Portainer Stacks → Add Stack → paste
+#
+# Build from git URL (no local clone):
 #   docker compose build
 #   docker compose up -d
 #
 # Default listens on port 7865.
-# Auto-update checks for repo changes daily at 04:00.
 # ============================================================
 
 services:
@@ -18,7 +19,7 @@ services:
     # ── Pre-built image from GHCR (CI builds on every push to main) ──
     image: ghcr.io/HexRebuilt/slopsmith-demucs-server:latest
 
-    # ── OR build from git URL (no local clone needed) ──
+    # ── OR build from git URL ──
     # build: https://github.com/HexRebuilt/slopsmith-demucs-server.git#main
 
     # ── OR build from local Dockerfile ──
@@ -31,22 +32,28 @@ services:
     ports:
       - "7865:7865"
     volumes:
-      # Persist model weights between restarts (~1.5 GB after warmup)
+      # Persistent model cache (~1.5 GB after warmup)
       - demucs-cache:/app/cache
-      # Mount .git so auto-update can pull changes
-      - type: bind
-        source: ./.git
-        target: /app/.git
-        read_only: false
+
+      # ⚠️ AUTO-UPDATE: To enable daily git pulls, uncomment the block
+      # below AND set AUTO_UPDATE=true in environment. Requires .git
+      # directory on the host. NOT compatible with Portainer.
+      # ---
+      # - type: bind
+      #   source: /absolute/path/to/your/clone/.git
+      #   target: /app/.git
+      #   read_only: false
+
     environment:
       - PORT=7865
       - HOST=0.0.0.0
-      - AUTO_UPDATE=true
+      # Auto-update: set to true only if .git bind mount is active
+      - AUTO_UPDATE=false
       - UPDATE_TIME=04:00
       - UPDATE_CHECK_INTERVAL=3600
       - SLOPSMITH_DEMUCS_MODEL=htdemucs_ft
-      # - SLOPSMITH_API_KEY=your-secret-key
       - SKIP_WARMUP=false
+      # - SLOPSMITH_API_KEY=your-secret-key
 
     # ── GPU support (requires nvidia-container-toolkit) ──
     # Uncomment the lines below for GPU acceleration:
