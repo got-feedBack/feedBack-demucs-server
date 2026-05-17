@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Git
+.git/
+.gitattributes
+.gitignore
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Claude / AI specs (not needed at runtime)
+.claude/
+.specify/
+
+# Docs / specs
+specs/
+
+# Docker
+.dockerignore
+Dockerfile
+docker-compose*.yml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+.cache/
+*.log

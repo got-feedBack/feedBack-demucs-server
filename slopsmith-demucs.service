@@ -1,14 +1,23 @@
 [Unit]
 Description=Slopsmith Demucs Separation Service
 After=network.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=byron
-ExecStart=/home/byron/Repositories/slopsmith-demucs-server/.venv/bin/python /home/byron/Repositories/slopsmith-demucs-server/server.py --port 7865
+User=YOUR_USERNAME
+# Edit the paths below to match your clone location and Python venv.
+# Example:
+#   ExecStart=/home/$USER/Repositories/slopsmith-demucs-server/.venv/bin/python /home/$USER/Repositories/slopsmith-demucs-server/server.py --port 7865
+ExecStart=/PATH/TO/slopsmith-demucs-server/.venv/bin/python /PATH/TO/slopsmith-demucs-server/server.py --port 7865
 Restart=always
 RestartSec=5
-Environment=SLOPSMITH_DEMUCS_MODEL=htdemucs
+# Optional: set device to cpu if no GPU
+# Environment=SLOPSMITH_DEMUCS_DEVICE=cpu
+# Optional: set default model
+# Environment=SLOPSMITH_DEMUCS_MODEL=htdemucs_ft
+# Optional: enable API key auth
+# Environment=SLOPSMITH_API_KEY=your-secret-key
 
 [Install]
 WantedBy=default.target
