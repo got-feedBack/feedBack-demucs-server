@@ -180,15 +180,44 @@ docker run -v $(pwd)/.git:/app/.git -p 7865:7865 slopsmith-demucs-server
 docker run -e AUTO_UPDATE=false -p 7865:7865 slopsmith-demucs-server
 ```
 
-### GitHub Container Registry
+### GitHub Container Registry (CI)
 
-The CI workflow (`.github/workflows/docker-build.yml`) automatically builds and pushes the image to `ghcr.io` on every push to `main`.
+The CI workflow (`.github/workflows/docker-build.yml`) automatically builds the Docker image and pushes it to GHCR on every push to `main`.
 
-To pull the pre-built image:
+**To enable on your fork:**
+1. Go to your fork on GitHub → **Actions** tab
+2. Click **"I understand my workflows, go ahead and enable them"**
+3. Push to `main` — the CI builds and pushes the image automatically
 
+**Pull the latest image:**
+```bash
+docker pull ghcr.io/YOUR_GITHUB_USER/slopsmith-demucs-server:latest
+```
+
+**Or from the upstream repo (once PR is merged):**
 ```bash
 docker pull ghcr.io/byrongamatos/slopsmith-demucs-server:latest
-docker run -p 7865:7865 ghcr.io/byrongamatos/slopsmith-demucs-server:latest
+```
+
+**Build directly from git (no clone needed):**
+```bash
+# From upstream main
+docker build https://github.com/byrongamatos/slopsmith-demucs-server.git#main -t slopsmith-demucs-server
+
+# From your fork
+docker build https://github.com/YOUR_USER/slopsmith-demucs-server.git#main -t slopsmith-demucs-server
+
+# Run it
+docker run --gpus all -p 7865:7865 slopsmith-demucs-server
+```
+
+**Run via Docker Compose with git build:**
+```yaml
+services:
+  slopsmith-demucs:
+    build: https://github.com/byrongamatos/slopsmith-demucs-server.git#main
+    ports:
+      - "7865:7865"
 ```
 
 ## API
