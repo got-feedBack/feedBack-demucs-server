@@ -1,0 +1,68 @@
+# ============================================================
+# Slopsmith Demucs Server — Docker Compose
+# ============================================================
+# Usage (CLI):
+#   docker compose up -d                    # Pull from GHCR + run
+#
+# Deploy (Portainer):
+#   Copy this file into Portainer Stacks → Add Stack → paste
+#
+# Build from git URL (no local clone):
+#   docker compose build
+#   docker compose up -d
+#
+# Default listens on port 7865.
+# ============================================================
+
+services:
+  slopsmith-demucs:
+    # ── Pre-built image from GHCR (CI builds on every push to main) ──
+    image: ghcr.io/hexrebuilt/slopsmith-demucs-server:latest
+
+    # ── OR build from git URL ──
+    # build: https://github.com/hexrebuilt/slopsmith-demucs-server.git#main
+
+    # ── OR build from local Dockerfile ──
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+
+    container_name: slopsmith-demucs-server
+    restart: unless-stopped
+    ports:
+      - "7865:7865"
+    volumes:
+      # Persistent model cache (~1.5 GB after warmup)
+      - demucs-cache:/app/cache
+
+      # ⚠️ AUTO-UPDATE: To enable daily git pulls, uncomment the block
+      # below AND set AUTO_UPDATE=true in environment. Requires .git
+      # directory on the host. NOT compatible with Portainer.
+      # ---
+      # - type: bind
+      #   source: /absolute/path/to/your/clone/.git
+      #   target: /app/.git
+      #   read_only: false
+
+    environment:
+      - PORT=7865
+      - HOST=0.0.0.0
+      # Auto-update: set to true only if .git bind mount is active
+      - AUTO_UPDATE=false
+      - UPDATE_TIME=04:00
+      - UPDATE_CHECK_INTERVAL=3600
+      - SLOPSMITH_DEMUCS_MODEL=htdemucs_ft
+      - SKIP_WARMUP=false
+      # - SLOPSMITH_API_KEY=your-secret-key
+      # - NVIDIA_VISIBLE_DEVICES=all
+      #  - NVIDIA_DRIVER_CAPABILITIES=all
+
+    # ── GPU support (requires nvidia-container-toolkit) ──
+    # Uncomment the lines below for GPU acceleration:
+    # runtime: nvidia
+    # environment:
+    #   - NVIDIA_VISIBLE_DEVICES=all
+    #   - NVIDIA_DRIVER_CAPABILITIES=all
+
+volumes:
+  demucs-cache:
