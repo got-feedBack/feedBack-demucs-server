@@ -17,10 +17,10 @@
 services:
   slopsmith-demucs:
     # ── Pre-built image from GHCR (CI builds on every push to main) ──
-    image: ghcr.io/HexRebuilt/slopsmith-demucs-server:latest
+    image: ghcr.io/hexrebuilt/slopsmith-demucs-server:latest
 
     # ── OR build from git URL ──
-    # build: https://github.com/HexRebuilt/slopsmith-demucs-server.git#main
+    # build: https://github.com/hexrebuilt/slopsmith-demucs-server.git#main
 
     # ── OR build from local Dockerfile ──
     # build:
