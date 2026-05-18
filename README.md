@@ -33,8 +33,9 @@ pip install -r requirements.txt
 # Step 2: Install demucs SEPARATELY (torchaudio version conflict workaround)
 # demucs requires torchaudio<2.1, which conflicts with whisperx.
 # Installing with --no-deps bypasses the bad pin.
+# dora-search is demucs's logging lib (imported as `import dora`).
 pip install demucs --no-deps
-pip install einops julius lameenc openunmix pyyaml tqdm
+pip install einops julius lameenc openunmix pyyaml tqdm dora-search
 ```
 
 > ⚠️ **Why two install steps?** `demucs` (PyPI 4.0.1) pins `torchaudio<2.1` while `whisperx` needs `torchaudio~=2.8.0`. These are incompatible. Installing demucs with `--no-deps` avoids the conflict. Demucs works fine with modern torchaudio — only the `save_audio` function had issues, and that's patched in `run_demucs.py` to use `soundfile` instead.
@@ -129,27 +130,54 @@ docker run --gpus all -p 7865:7865 slopsmith-demucs-server
 ### Docker Compose
 
 ```bash
-# CPU mode
+# Pull from GHCR and run (CPU)
 docker compose up -d
 
-# GPU mode (uncomment deploy.resources in docker-compose.yml first)
+# GPU mode: uncomment runtime: nvidia + NVIDIA_* env vars in compose file
 docker compose up -d
 ```
-
-The compose file mounts `.git` as a bind volume to enable auto-update (see below).
 
 ### Persistent model cache
 
-The Docker image stores downloaded model weights in `/app/cache`. A named volume `demucs-cache` is defined in `docker-compose.yml` to persist weights across restarts:
+Model weights are stored in `/app/cache` inside the container. The compose file maps this to a persistent volume so weights survive restarts:
 
 ```bash
 docker compose down    # cache preserved
-docker compose down -v # cache deleted
+docker compose down -v # cache deleted (if using named volume)
 ```
+
+To use a custom host path instead of a named volume (e.g. for Portainer or to save space on a specific drive), replace the volume in `docker-compose.yml`:
+
+```yaml
+volumes:
+  - /home/AI/slopsmith-demucs-cache:/app/cache
+```
+
+Then copy the existing cache to the new location:
+```bash
+# Find old volume path
+docker volume inspect slopsmith-demucs-server_demucs-cache
+# Copy to new location
+sudo cp -a /var/lib/docker/volumes/slopsmith-demucs-server_demucs-cache/_data/. /home/AI/slopsmith-demucs-cache/
+```
+
+**Cache environment variables** (all redirect to `/app/cache` to prevent container root disk exhaustion):
+
+| Variable | Purpose |
+|----------|---------|
+| `SLOPSMITH_DEMUCS_CACHE` | Server cache root |
+| `HF_HOME` | HuggingFace model cache |
+| `TORCH_HOME` | PyTorch hub cache |
+| `HUGGINGFACE_HUB_CACHE` | HuggingFace hub downloads |
 
 ### Auto-update
 
-When running in Docker, the server can automatically check for repository updates and restart with the new code.
+The container can automatically check for repository updates and restart. **Disabled by default** (safe for Portainer/deployments without `.git` access).
+
+**To enable:**
+1. Uncomment the `.git` bind mount in `docker-compose.yml`
+2. Set `AUTO_UPDATE=true` in environment
+3. Redeploy
 
 **How it works:**
 1. A background daemon runs inside the container
@@ -161,33 +189,26 @@ When running in Docker, the server can automatically check for repository update
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AUTO_UPDATE` | `true` | Enable/disable auto-update |
+| `AUTO_UPDATE` | `false` | Enable/disable auto-update |
 | `UPDATE_TIME` | `04:00` | Time of day to check (HH:MM, 24h) |
 | `UPDATE_CHECK_INTERVAL` | `3600` | Seconds between time checks (3600 = 1 hour) |
 | `SKIP_WARMUP` | `false` | Skip model weight download on startup |
 | `SLOPSMITH_DEMUCS_MODEL` | — | Override default Demucs model |
 | `SLOPSMITH_API_KEY` | — | API authentication key |
 
-**Important:** Auto-update requires the `.git` directory to be available inside the container. The provided `docker-compose.yml` binds `.git` from the host. If running with plain `docker run`, mount it manually:
-
-```bash
-docker run -v $(pwd)/.git:/app/.git -p 7865:7865 slopsmith-demucs-server
-```
-
-**Disable auto-update:**
-
+**Disable auto-update** (default — safe for Portainer):
 ```bash
 docker run -e AUTO_UPDATE=false -p 7865:7865 slopsmith-demucs-server
 ```
 
 ### GitHub Container Registry (CI)
 
-The CI workflow (`.github/workflows/docker-build.yml`) automatically builds the Docker image and pushes it to GHCR on every push to `main`.
+The CI workflow (`.github/workflows/docker-build.yml`) automatically builds the Docker image, pushes it to GHCR, generates an SBOM, and runs a grype vulnerability scan on every push to `main`.
 
 **To enable on your fork:**
 1. Go to your fork on GitHub → **Actions** tab
 2. Click **"I understand my workflows, go ahead and enable them"**
-3. Push to `main` — the CI builds and pushes the image automatically
+3. Push to `main` — the CI builds and scans automatically
 
 **Pull the latest image:**
 ```bash
