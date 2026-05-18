@@ -69,6 +69,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # ── Create output directory for SBOM + scan results ──
+      - name: Create output directory
+        run: mkdir -p sbom/
+
       # ── SBOM Generation ──────────────────────────────────────────────────
       - name: Generate SBOM with Syft
         uses: anchore/sbom-action@v0
