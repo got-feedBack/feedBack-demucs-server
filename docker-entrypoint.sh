@@ -20,63 +20,73 @@ set -euo pipefail
 
 cd /app
 
+
 # ── Auto-update daemon ──────────────────────────────────────────────────
 auto_update_loop() {
+    LAST_UPDATE_DATE=""
+
     while true; do
+        if [ "${AUTO_UPDATE:-true}" = "true" ]; then
+            CURRENT_TIME=$(date +%H:%M)
+            TARGET_TIME="${UPDATE_TIME:-04:00}"
+
+            echo "[updater] $(date): Checking time — current=$CURRENT_TIME target=$TARGET_TIME"
+
+            # Convert times to minutes since midnight for numeric comparison
+            CURRENT_MINUTES=$(( $(date +%H) * 60 + $(date +%M) ))
+            TARGET_HOUR="${TARGET_TIME%:*}"
+            TARGET_MIN="${TARGET_TIME#*:}"
+            # Use 10# prefix to avoid octal interpretation of leading zeros
+            TARGET_HOUR=$((10#$TARGET_HOUR))
+            TARGET_MIN=$((10#$TARGET_MIN))
+            TARGET_MINUTES=$(( TARGET_HOUR * 60 + TARGET_MIN ))
+
+            # 30-minute window around the target time
+            WINDOW=30
+            DIFF=$(( CURRENT_MINUTES - TARGET_MINUTES ))
+            ABS_DIFF=$(( DIFF < 0 ? -DIFF : DIFF ))
+
+            TODAY=$(date +%F)
+            if [ "$ABS_DIFF" -le "$WINDOW" ] && [ "$LAST_UPDATE_DATE" != "$TODAY" ]; then
+                echo "[updater] $(date): Time matches — checking repository for changes..."
+
+                # Only check if we have a remote configured
+                if ! git remote get-url origin &>/dev/null; then
+                    echo "[updater] No git remote 'origin' configured. Skipping update check."
+                else
+                    # Fetch remote without merging
+                    if ! git fetch origin 2>/tmp/git_fetch_err; then
+                        echo "[updater] git fetch failed: $(cat /tmp/git_fetch_err)"
+                    else
+                        LOCAL=$(git rev-parse HEAD)
+                        REMOTE=$(git rev-parse @{upstream} 2>/dev/null || echo "")
+
+                        if [ -z "$REMOTE" ]; then
+                            echo "[updater] No upstream branch configured. Skipping."
+                        elif [ "$LOCAL" = "$REMOTE" ]; then
+                            echo "[updater] Repository is up-to-date."
+                        else
+                            echo "[updater] Changes detected ($(git rev-list --count HEAD..@{upstream}) new commits). Updating..."
+                            if git pull --ff-only; then
+                                echo "[updater] Reinstalling dependencies..."
+                                pip install --no-cache-dir -r requirements.txt 2>/dev/null || echo "[updater] Warning: pip install failed (non-fatal)"
+                                pip install --no-cache-dir demucs --no-deps 2>/dev/null || echo "[updater] Warning: demucs install failed (non-fatal)"
+                                echo "[updater] Update complete. Restarting server..."
+                                touch /tmp/restart-server
+                            else
+                                echo "[updater] Fast-forward update failed. Skipping this cycle."
+                            fi
+                        fi
+                    fi
+                fi
+
+                LAST_UPDATE_DATE="$TODAY"
+            fi
+        fi
+
         sleep "${UPDATE_CHECK_INTERVAL:-3600}"
-
-        if [ "${AUTO_UPDATE:-true}" != "true" ]; then
-            continue
-        fi
-
-        CURRENT_TIME=$(date +%H:%M)
-        TARGET_TIME="${UPDATE_TIME:-04:00}"
-
-        echo "[updater] $(date): Checking time — current=$CURRENT_TIME target=$TARGET_TIME"
-
-        if [ "$CURRENT_TIME" != "$TARGET_TIME" ]; then
-            continue
-        fi
-
-        echo "[updater] $(date): Checking repository for changes..."
-
-        # Only check if we have a remote configured
-        if ! git remote get-url origin &>/dev/null; then
-            echo "[updater] No git remote 'origin' configured. Skipping update check."
-            continue
-        fi
-
-        # Fetch remote without merging
-        if ! git fetch origin 2>/tmp/git_fetch_err; then
-            echo "[updater] git fetch failed: $(cat /tmp/git_fetch_err)"
-            continue
-        fi
-
-        LOCAL=$(git rev-parse HEAD)
-        REMOTE=$(git rev-parse @{upstream} 2>/dev/null || echo "")
-
-        if [ -z "$REMOTE" ]; then
-            echo "[updater] No upstream branch configured. Skipping."
-            continue
-        fi
-
-        if [ "$LOCAL" = "$REMOTE" ]; then
-            echo "[updater] Repository is up-to-date."
-            continue
-        fi
-
-        echo "[updater] Changes detected ($(git rev-list --count HEAD..@{upstream}) new commits). Pulling..."
-        git pull
-
-        echo "[updater] Reinstalling dependencies..."
-        pip install --no-cache-dir -r requirements.txt 2>/dev/null || echo "[updater] Warning: pip install failed (non-fatal)"
-        pip install --no-cache-dir demucs --no-deps 2>/dev/null || echo "[updater] Warning: demucs install failed (non-fatal)"
-
-        echo "[updater] Update complete. Restarting server..."
-        touch /tmp/restart-server
     done
 }
-
 # ── Graceful shutdown ─────────────────────────────────────────────────
 cleanup() {
     echo "[entrypoint] SIGTERM received. Stopping server (PID ${SERVER_PID:-unknown})..."
