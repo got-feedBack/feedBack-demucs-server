@@ -58,13 +58,18 @@ RUN pip install --no-cache-dir \
 # ---- COPY application code ----
 COPY . .
 
+# ---- Least privilege runtime user ----
+RUN useradd --create-home --uid 10001 appuser \
+    && chown -R appuser:appuser /app
+
+
 # ---- Server port ----
 EXPOSE 7865
 
 # ---- Default environment ----
 ENV PORT=7865 \
     HOST=0.0.0.0 \
-    AUTO_UPDATE=true \
+    AUTO_UPDATE=false \
     UPDATE_TIME=04:00 \
     UPDATE_CHECK_INTERVAL=3600 \
     SLOPSMITH_DEMUCS_CACHE=/app/cache \
@@ -73,6 +78,8 @@ ENV PORT=7865 \
     TORCH_HOME=/app/cache/torch \
     HUGGINGFACE_HUB_CACHE=/app/cache/huggingface/hub \
     MPLLOCALEDIR=/app/cache/locale
+USER appuser
+
 
 # ---- Volume for model cache (persist across restarts) ----
 VOLUME /app/cache

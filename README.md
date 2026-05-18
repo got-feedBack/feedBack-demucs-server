@@ -223,10 +223,10 @@ docker pull ghcr.io/byrongamatos/slopsmith-demucs-server:latest
 **Build directly from git (no clone needed):**
 ```bash
 # From upstream main
-docker build https://github.com/byrongamatos/slopsmith-demucs-server.git#main -t slopsmith-demucs-server
+docker build -t slopsmith-demucs-server https://github.com/byrongamatos/slopsmith-demucs-server.git#main
 
 # From your fork
-docker build https://github.com/YOUR_USER/slopsmith-demucs-server.git#main -t slopsmith-demucs-server
+docker build -t slopsmith-demucs-server https://github.com/YOUR_USER/slopsmith-demucs-server.git#main
 
 # Run it
 docker run --gpus all -p 7865:7865 slopsmith-demucs-server

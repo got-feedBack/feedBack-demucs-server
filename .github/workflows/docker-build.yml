@@ -62,7 +62,7 @@ jobs:
           push: true
           tags: |
             ${{ steps.tag.outputs.tag }}
-            ${{ steps.tag.outputs.image }}:latest
+            ${{ github.ref == 'refs/heads/main' && format('{0}:latest', steps.tag.outputs.image) || '' }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -104,10 +104,15 @@ jobs:
           sarif_file: ${{ steps.scan.outputs.sarif }}
           category: grype
 
+      # ── Install Grype CLI for human-readable report ──────────────────
+      - name: Install Grype CLI
+        id: grype-cli
+        uses: anchore/scan-action/download-grype@v5
+
       - name: Generate human-readable scan report
         if: success() || failure()
         run: |
-          grype ${{ steps.tag.outputs.tag }} --scope all-layers -o table > sbom/vulnerability-report.txt || true
+          ${{ steps.grype-cli.outputs.cmd }} ${{ steps.tag.outputs.tag }} --scope all-layers -o table > sbom/vulnerability-report.txt || true
           echo "=== Vulnerability Report ==="
           cat sbom/vulnerability-report.txt
 
