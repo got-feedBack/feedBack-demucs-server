@@ -241,11 +241,12 @@ services:
       - "7865:7865"
 ```
 
+
 ## API
 
 ### `GET /health`
 
-Returns server status, model, GPU availability, cache directory, and per-model warmup state.
+Returns server status, model, GPU availability, cache directory, and per-model warmup state (see [First-start model weight download](#first-start-model-weight-download)).
 
 ### `POST /separate`
 
@@ -259,14 +260,23 @@ Separate audio into stems.
 
 ### `POST /align`
 
-Forced-align lyrics against audio.
+Forced-align lyrics against audio using WhisperX (faster-whisper transcription + wav2vec2 forced aligner).
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `file` | Form (file) | Audio file |
+| `file` | Form (file) | Audio file (vocals stem) |
 | `text` | Form | Plain text lyrics |
-| `language` | Form | ISO 639-1/2 language code hint (optional, auto-detected) |
+| `language` | Form | ISO 639-1/2 language code hint, e.g. `en`, `es`, `pt` (optional, auto-detected). Must be 2–8 lowercase letters; subtags like `en-US` are not supported. |
 | `granularity` | Form | `line` (default), `word`, `syllable`, or `phoneme` |
+
+Granularity behaviour:
+
+- `line` — segment-level boundaries.
+- `word` — wav2vec2-aligned word timestamps. The first entry in each line carries `new_line: true`.
+- `syllable` — `word` output split via pyphen; carries `new_line` on the first syllable of each line.
+- `phoneme` — character-level CTC token timestamps from the aligner. Each entry carries `phoneme: true`. With wav2vec2 character models these are letter-aligned; with phoneme-trained models they're true phonemes.
+
+Returns: `{"segments": [...], "language": "en"}` where each segment is `{start, end, text, ...}`.
 
 ### `POST /pitch`
 
@@ -274,8 +284,10 @@ Per-syllable pitch extraction using CREPE.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `file` | Form (file) | Vocals stem |
-| `lyrics` | Form | JSON array of `{"t": float, "d": float}` — token start/duration |
+| `file` | Form (file) | Vocals stem (any format librosa can read) |
+| `lyrics` | Form | JSON array of `{"t": float, "d": float}` — token start / duration in seconds |
+
+Returns: `{"notes": [{"t": 12.34, "d": 0.5, "midi": 64}, ...]}`. Tokens for which no pitch could be estimated (even after neighbour-borrow) are omitted.
 
 ### `GET /download/{job_id}/{stem}`
 

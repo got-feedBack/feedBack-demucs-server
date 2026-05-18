@@ -139,6 +139,8 @@ restart_loop() {
             echo "[entrypoint] Server exited and auto-update disabled. Exiting."
             break
         fi
+        # Crash-loop backoff — prevent thrash if server exits quickly
+        sleep 2
     done
 }
 
