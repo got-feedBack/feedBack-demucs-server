@@ -32,7 +32,8 @@ services:
     ports:
       - "7865:7865"
     volumes:
-      # Persistent model cache (~1.5 GB after warmup)
+      # Persistent model cache (~1.5 GB after warmup).
+      # Stores: demucs weights, whisperx ASR, CREPE, wav2vec2 aligners
       - demucs-cache:/app/cache
 
       # ⚠️ AUTO-UPDATE: To enable daily git pulls, uncomment the block
@@ -53,9 +54,13 @@ services:
       - UPDATE_CHECK_INTERVAL=3600
       - SLOPSMITH_DEMUCS_MODEL=htdemucs_ft
       - SKIP_WARMUP=false
+      # Cache directories — redirect all model downloads to the
+      # persistent volume so they survive container restarts:
+      - SLOPSMITH_DEMUCS_CACHE=/app/cache
+      - TORCH_HOME=/app/cache/torch
+      - HF_HOME=/app/cache/huggingface
+      - HUGGINGFACE_HUB_CACHE=/app/cache/huggingface/hub
       # - SLOPSMITH_API_KEY=your-secret-key
-      # - NVIDIA_VISIBLE_DEVICES=all
-      #  - NVIDIA_DRIVER_CAPABILITIES=all
 
     # ── GPU support (requires nvidia-container-toolkit) ──
     # Uncomment the lines below for GPU acceleration:

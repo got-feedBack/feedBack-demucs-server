@@ -52,7 +52,8 @@ RUN pip install --no-cache-dir \
         lameenc \
         openunmix \
         pyyaml \
-        tqdm
+        tqdm \
+        dora-search
 
 # ---- COPY application code ----
 COPY . .
@@ -66,7 +67,12 @@ ENV PORT=7865 \
     AUTO_UPDATE=true \
     UPDATE_TIME=04:00 \
     UPDATE_CHECK_INTERVAL=3600 \
-    SLOPSMITH_DEMUCS_CACHE=/app/cache
+    SLOPSMITH_DEMUCS_CACHE=/app/cache \
+    # Redirect HuggingFace and PyTorch caches to the persistent volume
+    HF_HOME=/app/cache/huggingface \
+    TORCH_HOME=/app/cache/torch \
+    HUGGINGFACE_HUB_CACHE=/app/cache/huggingface/hub \
+    MPLLOCALEDIR=/app/cache/locale
 
 # ---- Volume for model cache (persist across restarts) ----
 VOLUME /app/cache
