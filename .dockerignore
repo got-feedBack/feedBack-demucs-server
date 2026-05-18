@@ -39,3 +39,7 @@ Thumbs.db
 # Test artifacts
 .cache/
 *.log
+
+# Keys / certificates
+*.pem
+*.key
