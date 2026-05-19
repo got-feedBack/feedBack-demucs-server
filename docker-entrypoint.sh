@@ -114,7 +114,7 @@ restart_loop() {
     fi
 
     while true; do
-        echo "[entrypoint] Starting server: python server.py ${CLI_ARGS[*]}"
+        echo "[entrypoint] Starting server: python server.py ${CLI_ARGS[*]}" | sed "s/--api-key [^ ]*/--api-key ****/g"
         python server.py "${CLI_ARGS[@]}" &
         SERVER_PID=$!
         echo "[entrypoint] Server PID: $SERVER_PID"
