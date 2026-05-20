@@ -195,7 +195,7 @@ The container can automatically check for repository updates and restart. **Disa
 | `SKIP_WARMUP` | `false` | Skip model weight download on startup |
 | `SLOPSMITH_DEMUCS_MODEL` | — | Override default Demucs model |
 | `SLOPSMITH_API_KEY` | — | API authentication key |
-| `CACHE_TTL` | `1h` | Cache cleanup TTL (`1h`, `12h`, `24h`, or `NEVER` to disable auto-cleanup) |
+| `CACHE_TTL` | `24h` | Cache cleanup TTL (`1h`, `12h`, `24h`, or `NEVER` to disable auto-cleanup) |
 
 **Disable auto-update** (default — safe for Portainer):
 ```bash
@@ -210,7 +210,7 @@ Model weight caches (`torch/`, `huggingface/`, `locale/`) are **never** deleted 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CACHE_TTL` | `1h` | Maximum age of cache entries (`1h`, `12h`, `24h`, or `NEVER` to disable) |
+| `CACHE_TTL` | `24h` | Maximum age of cache entries (`1h`, `12h`, `24h`, or `NEVER` to disable) |
 
 **Disable auto-cleanup:**
 ```bash
