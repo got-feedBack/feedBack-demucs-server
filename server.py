@@ -71,6 +71,34 @@ CACHE_DIR = Path(os.environ.get(
     Path.home() / ".cache" / "slopsmith-demucs",
 ))
 MAX_CONCURRENT = 2
+CACHE_TTL = os.environ.get("CACHE_TTL", "1h")
+# Directories under CACHE_DIR that hold model weights (never auto-deleted)
+_PRESERVED_CACHE_DIRS = frozenset({"torch", "huggingface", "locale"})
+
+
+def _parse_ttl(ttl_str: str) -> int | None:
+    """Parse a TTL string like '1h', '12h', '24h' to seconds.
+    
+    Returns None for 'NEVER' (case-insensitive) to disable cleanup.
+    """
+    ttl_str = ttl_str.strip()
+    if ttl_str.upper() == "NEVER":
+        return None
+    m = re.match(r"^(\d+)\s*([hmd])$", ttl_str)
+    if not m:
+        print(f"[cache] WARNING: Invalid CACHE_TTL={ttl_str!r}, defaulting to 1h")
+        return 3600
+    value = int(m.group(1))
+    unit = m.group(2)
+    multipliers = {"h": 3600, "m": 60, "d": 86400}
+    return value * multipliers[unit]
+
+
+CACHE_TTL_SECONDS = _parse_ttl(CACHE_TTL)
+if CACHE_TTL_SECONDS is not None:
+    print(f"[cache] TTL={CACHE_TTL} ({CACHE_TTL_SECONDS}s)")
+else:
+    print("[cache] Cleanup disabled (CACHE_TTL=NEVER)")
 
 # ── State ───────────────────────────────────────────────────────────────
 
@@ -166,6 +194,9 @@ async def _startup_event():
             _set_warmup_state(k, "skipped")
     else:
         threading.Thread(target=_run_warmup, daemon=True).start()
+    # Start background cache cleanup (daemon thread, dies with server)
+    if CACHE_TTL_SECONDS is not None:
+        threading.Thread(target=_cache_cleanup_loop, daemon=True).start()
 
 
 # ── Health ──────────────────────────────────────────────────────────────
@@ -1632,6 +1663,43 @@ def _run_warmup() -> None:
     else:
         print("[warmup] finished with failures — see /health for per-model state", flush=True)
 
+
+
+# ── Cache cleanup ────────────────────────────────────────────────────────
+
+def _cache_cleanup_loop() -> None:
+    """Background daemon thread: periodically delete expired stem cache dirs.
+    
+    Walks CACHE_DIR, skips preserved directories (torch, huggingface, locale),
+    and deletes any stem cache directory whose mtime exceeds CACHE_TTL.
+    Runs every 10 minutes.
+    """
+    if CACHE_TTL_SECONDS is None:
+        return  # Shouldn't happen — caller checks, but be safe
+    
+    CHECK_INTERVAL = 600  # 10 minutes between sweep cycles
+    print(f"[cache] Cleanup thread started (check every {CHECK_INTERVAL}s)", flush=True)
+    
+    while True:
+        time.sleep(CHECK_INTERVAL)
+        try:
+            now = time.time()
+            for entry in CACHE_DIR.iterdir():
+                if not entry.is_dir():
+                    continue
+                if entry.name in _PRESERVED_CACHE_DIRS:
+                    continue
+                try:
+                    mtime = entry.stat().st_mtime
+                    age = now - mtime
+                    if age > CACHE_TTL_SECONDS:
+                        print(f"[cache] Deleting expired: {entry.name} "
+                              f"(age={age:.0f}s > TTL={CACHE_TTL_SECONDS}s)", flush=True)
+                        shutil.rmtree(entry, ignore_errors=True)
+                except OSError as e:
+                    print(f"[cache] Error accessing {entry.name}: {e}", flush=True)
+        except Exception as e:
+            print(f"[cache] Cleanup sweep error: {e}", flush=True)
 
 # ── CLI entry point ─────────────────────────────────────────────────────
 

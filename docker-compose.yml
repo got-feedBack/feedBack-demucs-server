@@ -54,6 +54,8 @@ services:
       - UPDATE_CHECK_INTERVAL=3600
       - SLOPSMITH_DEMUCS_MODEL=htdemucs_ft
       - SKIP_WARMUP=false
+      # Cache cleanup TTL: auto-delete stems older than this (1h, 12h, 24h, NEVER)
+      - CACHE_TTL=1h
       # Cache directories — redirect all model downloads to the
       # persistent volume so they survive container restarts:
       - SLOPSMITH_DEMUCS_CACHE=/app/cache

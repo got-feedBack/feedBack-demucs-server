@@ -195,10 +195,31 @@ The container can automatically check for repository updates and restart. **Disa
 | `SKIP_WARMUP` | `false` | Skip model weight download on startup |
 | `SLOPSMITH_DEMUCS_MODEL` | — | Override default Demucs model |
 | `SLOPSMITH_API_KEY` | — | API authentication key |
+| `CACHE_TTL` | `1h` | Cache cleanup TTL (`1h`, `12h`, `24h`, or `NEVER` to disable auto-cleanup) |
 
 **Disable auto-update** (default — safe for Portainer):
 ```bash
 docker run -e AUTO_UPDATE=false -p 7865:7865 slopsmith-demucs-server
+```
+
+### Cache cleanup
+
+The server automatically deletes old stem cache directories to prevent disk growth. A background thread runs every 10 minutes, checks each stem cache directory under `SLOPSMITH_DEMUCS_CACHE`, and removes directories older than `CACHE_TTL`.
+
+Model weight caches (`torch/`, `huggingface/`, `locale/`) are **never** deleted — only the stem output cache is cleaned.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CACHE_TTL` | `1h` | Maximum age of cache entries (`1h`, `12h`, `24h`, or `NEVER` to disable) |
+
+**Disable auto-cleanup:**
+```bash
+docker run -e CACHE_TTL=NEVER -p 7865:7865 slopsmith-demucs-server
+```
+
+**Set custom TTL (e.g. 12 hours):**
+```bash
+docker run -e CACHE_TTL=12h -p 7865:7865 slopsmith-demucs-server
 ```
 
 ### GitHub Container Registry (CI)
