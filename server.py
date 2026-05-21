@@ -1681,7 +1681,6 @@ def _cache_cleanup_loop() -> None:
     print(f"[cache] Cleanup thread started (check every {CHECK_INTERVAL}s)", flush=True)
     
     while True:
-        time.sleep(CHECK_INTERVAL)
         try:
             now = time.time()
             for entry in CACHE_DIR.iterdir():
@@ -1696,10 +1695,13 @@ def _cache_cleanup_loop() -> None:
                         print(f"[cache] Deleting expired: {entry.name} "
                               f"(age={age:.0f}s > TTL={CACHE_TTL_SECONDS}s)", flush=True)
                         shutil.rmtree(entry, ignore_errors=True)
+                        with jobs_lock:
+                            jobs.pop(entry.name, None)
                 except OSError as e:
                     print(f"[cache] Error accessing {entry.name}: {e}", flush=True)
         except Exception as e:
             print(f"[cache] Cleanup sweep error: {e}", flush=True)
+        time.sleep(CHECK_INTERVAL)
 
 # ── CLI entry point ─────────────────────────────────────────────────────
 
