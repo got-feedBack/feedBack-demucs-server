@@ -1,6 +1,6 @@
 # Slopsmith Demucs Server
 
-A lightweight GPU-accelerated service that provides AI source separation and lyrics alignment for [Slopsmith](https://github.com/got-feedback/feedback). Designed to run on a desktop with a CUDA GPU while Slopsmith runs on a NAS or Docker host.
+A lightweight GPU-accelerated service that provides AI source separation and lyrics alignment for [Slopsmith](https://github.com/got-feedback/feedBack). Designed to run on a desktop with a CUDA GPU while Slopsmith runs on a NAS or Docker host.
 
 ## Features
 
@@ -24,8 +24,8 @@ plus a wav2vec2 forced aligner for tighter sub-word timestamps:
 - Phoneme/character-level CTC alignment via wav2vec2 (per-language model)
 - Syllable splitting layered on word output via pyphen hyphenation (CJK character support)
 - Automatic language detection (or manual language hint)
-- Used by the [Lyrics Sync plugin](https://github.com/got-feedback/feedback-plugin-lyrics-sync)
-  and the [Lyrics Karaoke plugin](https://github.com/got-feedback/feedback-plugin-lyrics-karaoke)
+- Used by the [Lyrics Sync plugin](https://github.com/got-feedback/feedBack-plugin-lyrics-sync)
+  and the [Lyrics Karaoke plugin](https://github.com/got-feedback/feedBack-plugin-lyrics-karaoke)
 
 ### Per-syllable Pitch Extraction (`POST /pitch`)
 
@@ -33,7 +33,7 @@ Estimates one MIDI note per syllable from a vocals stem using
 [CREPE](https://github.com/marl/crepe) via
 [torchcrepe](https://github.com/maxrmorrison/torchcrepe). Powers the
 karaoke pitch chart in the
-[Lyrics Karaoke plugin](https://github.com/got-feedback/feedback-plugin-lyrics-karaoke):
+[Lyrics Karaoke plugin](https://github.com/got-feedback/feedBack-plugin-lyrics-karaoke):
 
 - CREPE neural pitch tracker — order-of-magnitude fewer octave errors than pYIN
 - Confidence-weighted mode-of-semitone aggregation per syllable
