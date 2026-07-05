@@ -95,7 +95,7 @@ jobs:
         with:
   image-reference: ${{ steps.tag.outputs.tag }}
   fail-build: false
-  acs-report-severity-cutoff: high
+  severity-cutoff: high
 
       - name: Upload SARIF report to GitHub
         if: steps.scan.outputs.sarif != ''
