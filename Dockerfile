@@ -36,6 +36,9 @@ WORKDIR /app
 # ---- COPY requirements first (leverage Docker layer cache) ----
 COPY requirements.txt .
 
+# Upgrade pip tooling to reduce known vulnerabilities in old pip/setuptools
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
 # ---- Install main Python dependencies ----
 # whisperx pins torch~=2.8.0 + torchaudio~=2.8.0 — this satisfies torchcrepe too.
 RUN pip install --no-cache-dir -r requirements.txt
