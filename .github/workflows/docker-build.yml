@@ -95,7 +95,7 @@ jobs:
 with:
     image: ${{ steps.tag.outputs.tag }}
     fail-build: false
-    severity-cutoff: high
+    severity-cutoff: medium
 
       - name: Upload SARIF report to GitHub
         if: steps.scan.outputs.sarif != ''
