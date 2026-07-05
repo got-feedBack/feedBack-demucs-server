@@ -107,7 +107,7 @@ jobs:
       # ── Install Grype CLI for human-readable report ──────────────────
       - name: Install Grype CLI
         id: grype-cli
-        uses: anchore/scan-action/download-grype@v1
+        uses: anchore/scan-action/download-grype@869c549e657a088dc0441b08ce4fc0ecdac2bb65
 
       - name: Generate human-readable scan report
         if: success() || failure()
