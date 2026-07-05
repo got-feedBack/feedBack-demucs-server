@@ -14,6 +14,11 @@ python-multipart>=0.0.7
 
 # ---- Audio I/O ----
 soundfile>=0.12.0
+# Roformer / MDXC separation (BS-Roformer-SW etc.) via run_roformer.py.
+# Roformer inference runs on torch/CUDA; the bundled onnxruntime (CPU) is
+# only used by other audio-separator models. For onnx-based models on GPU,
+# install the extra instead:  pip install "audio-separator[gpu]"
+audio-separator>=0.44.0
 librosa>=0.10.0
 
 # ---- Lyrics alignment ----

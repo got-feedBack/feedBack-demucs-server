@@ -6,9 +6,46 @@ A lightweight GPU-accelerated service providing AI source separation, lyrics ali
 
 ## Features
 
-- **Source Separation** (`POST /separate`) — Split audio into stems using Demucs (`htdemucs_ft` default, also `htdemucs_6s`, `mdx_extra`)
-- **Lyrics Alignment** (`POST /align`) — Forced alignment of plain text lyrics against audio via WhisperX + wav2vec2 (line/word/syllable/phoneme granularity)
-- **Per-syllable Pitch Extraction** (`POST /pitch`) — MIDI note estimation per syllable using CREPE/torchcrepe
+### Source Separation (`POST /separate`)
+
+Splits audio into individual stems using [Demucs](https://github.com/facebookresearch/demucs):
+
+- Default model: **`htdemucs_ft`** (4-stem fine-tuned: drums, bass, vocals, other)
+- Other models selectable per-request: `htdemucs_6s` (6-stem incl. guitar/piano), `mdx_extra` (lighter)
+- **`bs_roformer_sw`** — BS-Roformer-SW (6-stem: vocals/drums/bass/guitar/piano/other), via
+  [audio-separator](https://github.com/nomadkaraoke/python-audio-separator). Higher SDR than
+  Demucs (notably bass/guitar) with far less cross-stem bleed; checkpoint (~700 MB) lazy-downloads
+  on first use to `<cache>/_roformer-models/`. Stems returned as lossless FLAC.
+- File upload or URL input
+- Per-stem caching, keyed by audio **and model** (avoids re-processing; same song under two models caches separately)
+- WebSocket progress updates
+
+### Lyrics Alignment (`POST /align`)
+
+Forced alignment of plain text lyrics against an audio file using
+[WhisperX](https://github.com/m-bain/whisperX) — Whisper transcription
+plus a wav2vec2 forced aligner for tighter sub-word timestamps:
+
+- **Line, word, syllable, or phoneme granularity**
+- Phoneme/character-level CTC alignment via wav2vec2 (per-language model)
+- Syllable splitting layered on word output via pyphen hyphenation (CJK character support)
+- Automatic language detection (or manual language hint)
+- Used by the [Lyrics Sync plugin](https://github.com/got-feedback/feedback-plugin-lyrics-sync)
+  and the [Lyrics Karaoke plugin](https://github.com/got-feedback/feedback-plugin-lyrics-karaoke)
+
+### Per-syllable Pitch Extraction (`POST /pitch`)
+
+Estimates one MIDI note per syllable from a vocals stem using
+[CREPE](https://github.com/marl/crepe) via
+[torchcrepe](https://github.com/maxrmorrison/torchcrepe). Powers the
+karaoke pitch chart in the
+[Lyrics Karaoke plugin](https://github.com/got-feedback/feedback-plugin-lyrics-karaoke):
+
+- CREPE neural pitch tracker — order-of-magnitude fewer octave errors than pYIN
+- Confidence-weighted mode-of-semitone aggregation per syllable
+- Song-wide range narrowing (clamps each syllable to ±12 semitones around the median)
+- Octave-error correction against the song-wide median
+- Neighbour-borrowed pitch for tokens CREPE can't lock (so whispered phrases still get bars)
 
 ## Setup
 
@@ -21,8 +58,8 @@ A lightweight GPU-accelerated service providing AI source separation, lyrics ali
 ### Install (Native)
 
 ```bash
-git clone https://github.com/byrongamatos/slopsmith-demucs-server.git
-cd slopsmith-demucs-server
+git clone https://github.com/got-feedback/feedback-demucs-server.git
+cd feedback-demucs-server
 python -m venv .venv
 source .venv/bin/activate
 
