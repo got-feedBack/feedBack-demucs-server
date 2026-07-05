@@ -25,15 +25,22 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # ---- System dependencies ----
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+ffmpeg \
+git \
+libgomp1 \
+&& rm -rf /var/lib/apt/lists/*
 
 # ---- Application directory ----
 WORKDIR /app
 
 # ---- COPY requirements first (leverage Docker layer cache) ----
 COPY requirements.txt .
+
+# Install PyTorch + torchaudio first so whisperx / torchcrepe / audio-separator
+# find a compatible torch already satisfied instead of fighting over versions.
+RUN pip install --no-cache-dir \
+torch torchaudio \
+--index-url https://download.pytorch.org/whl/cpu
 
 # ---- Install main Python dependencies ----
 # whisperx pins torch~=2.8.0 + torchaudio~=2.8.0 — this satisfies torchcrepe too.
