@@ -92,10 +92,10 @@ jobs:
       - name: Scan Docker image with Grype
         id: scan
         uses: anchore/scan-action@869c549e657a088dc0441b08ce4fc0ecdac2bb65
-        with:
-  image-reference: ${{ steps.tag.outputs.tag }}
-  fail-build: false
-  severity-cutoff: high
+with:
+    image: ${{ steps.tag.outputs.tag }}
+    fail-build: false
+    severity-cutoff: high
 
       - name: Upload SARIF report to GitHub
         if: steps.scan.outputs.sarif != ''
