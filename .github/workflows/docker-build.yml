@@ -93,9 +93,9 @@ jobs:
         id: scan
         uses: anchore/scan-action@v1
         with:
-          image: ${{ steps.tag.outputs.tag }}
-          fail-build: false
-          severity-cutoff: high
+  image-reference: ${{ steps.tag.outputs.tag }}
+  fail-build: false
+  acs-report-severity-cutoff: high
 
       - name: Upload SARIF report to GitHub
         if: steps.scan.outputs.sarif != ''
