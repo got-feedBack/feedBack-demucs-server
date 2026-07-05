@@ -1,8 +1,8 @@
 # Slopsmith Demucs Server
 
-A lightweight GPU-accelerated service providing AI source separation, lyrics alignment, and per-syllable pitch extraction for [Slopsmith](https://github.com/byrongamatos/slopsmith). Designed to run on a desktop with a CUDA GPU while Slopsmith runs on a NAS or Docker host.
+A lightweight GPU-accelerated service providing AI source separation, lyrics alignment, and per-syllable pitch extraction for [Slopsmith](https://github.com/got-feedback/feedback). Designed to run on a desktop with a CUDA GPU while Slopsmith runs on a NAS or Docker host.
 
-[![Docker Build](https://github.com/byrongamatos/slopsmith-demucs-server/actions/workflows/docker-build.yml/badge.svg)](https://github.com/byrongamatos/slopsmith-demucs-server/actions/workflows/docker-build.yml)
+[![Docker Build](https://github.com/got-feedback/feedBack-demucs-server/actions/workflows/docker-build.yml/badge.svg)](https://github.com/got-feedback/feedBack-demucs-server/actions/workflows/docker-build.yml)
 
 ## Features
 
@@ -58,7 +58,7 @@ karaoke pitch chart in the
 ### Install (Native)
 
 ```bash
-git clone https://github.com/got-feedback/feedback-demucs-server.git
+  git clone https://github.com/got-feedback/feedBack-demucs-server.git
 cd feedback-demucs-server
 python -m venv .venv
 source .venv/bin/activate
@@ -124,22 +124,22 @@ Pass `--skip-warmup` for environments without internet access.
 
 1. Copy and edit the service file:
 ```bash
-cp slopsmith-demucs.service ~/.config/systemd/user/
-# Edit ~/.config/systemd/user/slopsmith-demucs.service
+ cp feedback-demucs.service ~/.config/systemd/user/
+ # Edit ~/.config/systemd/user/feedback-demucs.service
 # Set User, ExecStart paths to match your setup
-nano ~/.config/systemd/user/slopsmith-demucs.service
+nano ~/.config/systemd/user/feedback-demucs.service
 ```
 
 2. Enable and start:
 ```bash
 systemctl --user daemon-reload
-systemctl --user enable slopsmith-demucs
-systemctl --user start slopsmith-demucs
+systemctl --user enable feedback-demucs
+ systemctl --user start feedback-demucs
 ```
 
 3. Monitor:
 ```bash
-journalctl --user -u slopsmith-demucs --follow
+journalctl --user -u feedback-demucs --follow
 ```
 
 ## Docker
@@ -187,15 +187,15 @@ To use a custom host path instead of a named volume (e.g. for Portainer or to sa
 
 ```yaml
 volumes:
-  - /home/AI/slopsmith-demucs-cache:/app/cache
+  - /home/AI/feedback-demucs-cache:/app/cache
 ```
 
 Then copy the existing cache to the new location:
 ```bash
 # Find old volume path
-docker volume inspect slopsmith-demucs-server_demucs-cache
-# Copy to new location
-sudo cp -a /var/lib/docker/volumes/slopsmith-demucs-server_demucs-cache/_data/. /home/AI/slopsmith-demucs-cache/
+docker volume inspect feedback-demucs-server_demucs-cache
+ # Copy to new location
+ sudo cp -a /var/lib/docker/volumes/feedback-demucs-server_demucs-cache/_data/. /home/AI/feedback-demucs-cache/
 ```
 
 **Cache environment variables** (all redirect to `/app/cache` to prevent container root disk exhaustion):
@@ -233,6 +233,7 @@ The container can automatically check for repository updates and restart. **Disa
 | `SLOPSMITH_DEMUCS_MODEL` | — | Override default Demucs model |
 | `SLOPSMITH_API_KEY` | — | API authentication key |
 | `CACHE_TTL` | `24h` | Cache cleanup TTL (`1h`, `12h`, `24h`, or `NEVER` to disable auto-cleanup) |
+| `MODEL_IDLE_TIMEOUT` | `300` | Model idle timeout in seconds (`s`, `m`, `h` suffixes supported; `NEVER` to disable). Unloads WhisperX/CREPE after inactivity to free GPU memory. |
 
 **Disable auto-update** (default — safe for Portainer):
 ```bash
@@ -248,6 +249,7 @@ Model weight caches (`torch/`, `huggingface/`, `locale/`) are **never** deleted 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CACHE_TTL` | `24h` | Maximum age of cache entries (`1h`, `12h`, `24h`, or `NEVER` to disable) |
+| `MODEL_IDLE_TIMEOUT` | `300` | Model idle timeout (`s`/`m`/`h` suffixes; `NEVER` to disable) |
 
 **Disable auto-cleanup:**
 ```bash
@@ -257,6 +259,25 @@ docker run -e CACHE_TTL=NEVER -p 7865:7865 slopsmith-demucs-server
 **Set custom TTL (e.g. 12 hours):**
 ```bash
 docker run -e CACHE_TTL=12h -p 7865:7865 slopsmith-demucs-server
+ ```
+
+### Model idle timeout
+
+The server automatically unloads idle ML models to free GPU memory. A background thread checks every 60 seconds and unloads any model that hasn't been used longer than `MODEL_IDLE_TIMEOUT`.
+
+- **WhisperX ASR model** — unloaded as a whole
+- **WhisperX aligners** — evicted individually by language (oldest first)
+- **CREPE pitch model** — unloaded as a whole
+
+On unload, `torch.cuda.empty_cache()` is called to release GPU memory. Models are lazily re-loaded on the next request.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MODEL_IDLE_TIMEOUT` | `300` | Idle timeout (`s`/`m`/`h` suffixes; `NEVER` to disable) |
+
+**Disable model idle timeout:**
+```bash
+docker run -e MODEL_IDLE_TIMEOUT=NEVER -p 7865:7865 slopsmith-demucs-server
 ```
 
 ### GitHub Container Registry (CI)
@@ -275,13 +296,13 @@ docker pull ghcr.io/YOUR_GITHUB_USER/slopsmith-demucs-server:latest
 
 **Or from the upstream repo (once PR is merged):**
 ```bash
-docker pull ghcr.io/byrongamatos/slopsmith-demucs-server:latest
+docker pull ghcr.io/got-feedback/feedBack-demucs-server:latest
 ```
 
 **Build directly from git (no clone needed):**
 ```bash
 # From upstream main
-docker build -t slopsmith-demucs-server https://github.com/byrongamatos/slopsmith-demucs-server.git#main
+docker build -t slopsmith-demucs-server https://github.com/got-feedback/feedBack-demucs-server.git#main
 
 # From your fork
 docker build -t slopsmith-demucs-server https://github.com/YOUR_USER/slopsmith-demucs-server.git#main
@@ -294,7 +315,7 @@ docker run --gpus all -p 7865:7865 slopsmith-demucs-server
 ```yaml
 services:
   slopsmith-demucs:
-    build: https://github.com/byrongamatos/slopsmith-demucs-server.git#main
+    build: https://github.com/got-feedback/feedBack-demucs-server.git#main
     ports:
       - "7865:7865"
 ```
