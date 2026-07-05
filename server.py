@@ -260,6 +260,9 @@ async def _startup_event():
     # Start background cache cleanup (daemon thread, dies with server)
     if CACHE_TTL_SECONDS is not None:
         threading.Thread(target=_cache_cleanup_loop, daemon=True).start()
+    # Start background model idle unload (daemon thread, dies with server)
+    if _model_idle_timeout is not None:
+        threading.Thread(target=_model_idle_loop, daemon=True, name="model-idle").start()
 
 
 # ── Health ──────────────────────────────────────────────────────────────
@@ -409,7 +412,7 @@ _whisperx_aligners_lock = threading.Lock()
 # the same wav2vec2 weights (latency spike, possible GPU OOM).
 _whisperx_aligner_locks: dict[str, threading.Lock] = {}
 _whisperx_aligner_locks_guard = threading.Lock()
-
+_crepe_model = None
 
 def _get_aligner_load_lock(lang: str) -> threading.Lock:
     """Return the lock that serialises load_align_model calls for one
@@ -469,6 +472,7 @@ def _get_whisperx_model():
                     device=_whisperx_device(),
                     compute_type=_whisperx_compute_type(),
                 )
+    _touch_model("whisperx")
     # Intentionally do NOT mark warmup ready here. /align needs both the
     # ASR model AND a wav2vec2 aligner to function — if the aligner load
     # fails (unsupported language, transient network), /align would still
@@ -582,6 +586,7 @@ def _get_whisperx_aligner(language: str):
 
     if lang == "en":
         _mark_lazy_loaded("whisperx")
+    _touch_model("whisperx_aligner")
     return pair
 
 
@@ -616,6 +621,53 @@ def _syllabify(word: str, hyphenator) -> list[str]:
         return list(word)
     parts = hyphenator.inserted(word).split('-')
     return parts if parts else [word]
+
+def _touch_model(name: str) -> None:
+    """Update last-use timestamp for a model."""
+    if _model_idle_timeout is None:
+        return
+    with _model_idle_lock:
+        _model_last_used[name] = time.time()
+
+def _unload_whisperx_model() -> None:
+    """Unload the WhisperX ASR model from memory."""
+    global _whisperx_model
+    if _whisperx_model is not None:
+        _whisperx_model = None
+    if _whisperx_device().startswith("cuda"):
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+    print("[model-idle] Unloaded whisperx ASR model", flush=True)
+
+def _unload_whisperx_aligner(lang: str) -> None:
+    """Unload a specific WhisperX aligner from memory."""
+    with _whisperx_aligners_lock:
+        pair = _whisperx_aligners.pop(lang, None)
+        if pair is not None:
+            with _whisperx_aligner_locks_guard:
+                _whisperx_aligner_locks.pop(lang, None)
+            _set_aligner_state(lang, "evicted")
+    if _whisperx_device().startswith("cuda"):
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+    print(f"[model-idle] Unloaded whisperx aligner: {lang}", flush=True)
+
+def _unload_crepe() -> None:
+    """Unload the CREPE pitch model from memory."""
+    global _crepe_model
+    if _crepe_model is not None:
+        _crepe_model = None
+    if _crepe_device().startswith("cuda"):
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+    print("[model-idle] Unloaded CREPE model", flush=True)
+
 
 
 def _split_word_into_syllables(word_seg: dict, hyphenator) -> list[dict]:
@@ -1334,6 +1386,7 @@ def _extract_pitch_with_crepe(audio_path: Path, lyrics: list[dict]) -> list[dict
             nearest = min(indexed_confident, key=lambda c: abs(c[0] - i))
             r["midi"] = nearest[1]
 
+    _touch_model("crepe")
     return [r for r in raw if r["midi"] is not None]
 
 
@@ -1979,6 +2032,44 @@ def _cache_cleanup_loop() -> None:
                     print(f"[cache] Error accessing {entry.name}: {e}", flush=True)
         except Exception as e:
             print(f"[cache] Cleanup sweep error: {e}", flush=True)
+        time.sleep(CHECK_INTERVAL)
+
+def _model_idle_loop() -> None:
+    """Background daemon thread: unload models idle longer than MODEL_IDLE_TIMEOUT.
+    Checks every 60 seconds. WhisperX aligners are evicted individually by language
+    (oldest first); the ASR model and CREPE are evicted as whole units.
+    Only runs if MODEL_IDLE_TIMEOUT is set (not NEVER).
+    """
+    if _model_idle_timeout is None:
+        return
+    CHECK_INTERVAL = 60
+    print(
+        f"[model-idle] Thread started (timeout={_model_idle_timeout}s, "
+        f"check every {CHECK_INTERVAL}s)",
+        flush=True,
+    )
+    while True:
+        try:
+            now = time.time()
+            with _model_idle_lock:
+                idle_models = [
+                    name for name, ts in _model_last_used.items()
+                    if (now - ts) > _model_idle_timeout
+                ]
+            for name in idle_models:
+                if name == "whisperx":
+                    _unload_whisperx_model()
+                elif name == "whisperx_aligner":
+                    with _whisperx_aligners_lock:
+                        if _whisperx_aligners:
+                            oldest_lang = next(iter(_whisperx_aligners))
+                            _unload_whisperx_aligner(oldest_lang)
+                elif name == "crepe":
+                    _unload_crepe()
+                with _model_idle_lock:
+                    _model_last_used.pop(name, None)
+        except Exception as e:
+            print(f"[model-idle] Loop error: {e}", flush=True)
         time.sleep(CHECK_INTERVAL)
 
 # ── CLI entry point ─────────────────────────────────────────────────────
