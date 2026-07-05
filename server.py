@@ -83,7 +83,6 @@ CACHE_DIR = Path(os.environ.get(
     Path.home() / ".cache" / "slopsmith-demucs",
 ))
 MAX_CONCURRENT = 2
-<<<<<<< HEAD
 CACHE_TTL = os.environ.get("CACHE_TTL", "24h")
 # Directories under CACHE_DIR that hold model weights (never auto-deleted)
 _PRESERVED_CACHE_DIRS = frozenset({"torch", "huggingface", "locale"})
