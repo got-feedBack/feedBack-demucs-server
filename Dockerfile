@@ -12,11 +12,13 @@
 # ============================================================
 
 # ---- Base: Python slim ----
-FROM python:3.11-slim AS base
+FROM python:3.11-slim-bookworm AS base
 
 LABEL org.opencontainers.image.title="Slopsmith Demucs Server"
 LABEL org.opencontainers.image.description="AI source separation, lyrics alignment, and pitch extraction service for Slopsmith"
-LABEL org.opencontainers.image.source="https://github.com/byrongamatos/slopsmith-demucs-server"
+LABEL org.opencontainers.image.source="https://github.com/get-feedback/feedBack-demucs-server"
+LABEL org.opencontainers.image.vendor="Slopsmith"
+LABEL org.opencontainers.image.licenses="MIT"
 
 # Prevent Python from writing .pyc files & buffer stdout
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -24,11 +26,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 # ---- System dependencies ----
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update \
+&& apt-get install -y --no-install-recommends \
 ffmpeg \
 git \
 libgomp1 \
-&& rm -rf /var/lib/apt/lists/*
+&& rm -rf /var/lib/apt/lists/* \
+&& apt-get clean
 
 # ---- Application directory ----
 WORKDIR /app
@@ -48,7 +52,7 @@ RUN pip install --no-cache-dir \
 audio-separator>=0.44.0 \
 --no-deps \
 && pip install --no-cache-dir \
-onnxruntime \
+onnxruntime==1.17.1 \
 numpy \
 scipy
 
