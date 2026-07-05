@@ -91,7 +91,7 @@ jobs:
       # ── Vulnerability Scanning ──────────────────────────────────────────
       - name: Scan Docker image with Grype
         id: scan
-        uses: anchore/scan-action@v1
+        uses: anchore/scan-action@869c549e657a088dc0441b08ce4fc0ecdac2bb65
         with:
   image-reference: ${{ steps.tag.outputs.tag }}
   fail-build: false
