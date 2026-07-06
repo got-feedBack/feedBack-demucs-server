@@ -80,7 +80,7 @@ DEMUCS_DEVICE = os.environ.get("SLOPSMITH_DEMUCS_DEVICE", "")
 API_KEY = os.environ.get("SLOPSMITH_API_KEY", "")
 CACHE_DIR = Path(os.environ.get(
     "SLOPSMITH_DEMUCS_CACHE",
-    Path.home() / ".cache" / "slopsmith-demucs",
+    Path.home() / ".cache" / "feedback-demucs",
 ))
 MAX_CONCURRENT = 2
 CACHE_TTL = os.environ.get("CACHE_TTL", "24h")

@@ -63,9 +63,9 @@ spinning.
 - Python 3.10+, CUDA-capable GPU (with CPU fallback), FFmpeg.
 - Config via env vars / CLI flags only (no config files): `--port`,
   `--host`, `--model`, `--device`, `--api-key`, `--skip-warmup`,
-  `SLOPSMITH_DEMUCS_MODEL`, `SLOPSMITH_DEMUCS_DEVICE`,
-  `SLOPSMITH_API_KEY`, `SLOPSMITH_DEMUCS_CACHE`.
-- Default cache: `~/.cache/slopsmith-demucs/`.
+  `FEEDBACK_DEMUCS_MODEL`, `FEEDBACK_DEMUCS_DEVICE`,
+  `FEEDBACK_API_KEY`, `FEEDBACK_DEMUCS_CACHE`.
+- Default cache: `~/.cache/feedback-demucs/`.
 - Default model: `htdemucs_ft` (4-stem fine-tuned). `htdemucs_6s` and
   `mdx_extra` selectable per-request.
 - Max concurrent jobs: 2 (`MAX_CONCURRENT` in `server.py`).
@@ -77,18 +77,18 @@ spinning.
 - Single source file: `server.py` (≈1.7k LOC). New endpoints land here
   unless they grow large enough to justify a module split.
 - `run_demucs.py` is the standalone separator subprocess driver.
-- Run as a user-level systemd service via `slopsmith-demucs.service`.
+- Run as a user-level systemd service via `feedback-demucs.service`.
 - New ML dependencies MUST be pinned in `requirements.txt` with a lower
   bound that matches the import patterns in `server.py`.
 
 ## Governance
 
-This server is one of several repos in the Slopsmith ecosystem
-(`slopsmith`, `slopsmith-desktop`, `slopsmith-demo`, `slopsmith-ignition`,
+This server is one of several repos in the feedBack ecosystem
+(`feedback`, `feedback-desktop`, `feedback-demo`, `feedback-ignition`,
 plus per-feature plugin repos). The shared workspace at
-`~/Repositories/slopsmith-workspace/` coordinates them. Changes to the
-HTTP contract here are breaking changes for the Slopsmith plugin repos
-(`slopsmith-plugin-lyrics-sync`, `slopsmith-plugin-lyrics-karaoke`) and
+`~/Repositories/feedback-workspace/` coordinates them. Changes to the
+HTTP contract here are breaking changes for the feedback plugin repos
+(`feedback-plugin-lyrics-sync`, `feedback-plugin-lyrics-karaoke`) and
 MUST be rolled out compatibly: add new fields, never silently change
 existing ones; bump server version when removing.
 

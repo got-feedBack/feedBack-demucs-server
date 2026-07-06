@@ -1,5 +1,5 @@
 [Unit]
-Description=Slopsmith Demucs Separation Service
+Description=feedBack Demucs Separation Service
 After=network.target network-online.target
 Wants=network-online.target
 
@@ -9,15 +9,15 @@ User=YOUR_USERNAME
 # Edit the paths below to match your clone location and Python venv.
 # Example:
 #   ExecStart=/home/$USER/Repositories/slopsmith-demucs-server/.venv/bin/python /home/$USER/Repositories/slopsmith-demucs-server/server.py --port 7865
-ExecStart=/PATH/TO/slopsmith-demucs-server/.venv/bin/python /PATH/TO/slopsmith-demucs-server/server.py --port 7865
+ExecStart=/PATH/TO/feedback-demucs-server/.venv/bin/python /PATH/TO/feedback-demucs-server/server.py --port 7865
 Restart=always
 RestartSec=5
 # Optional: set device to cpu if no GPU
-# Environment=SLOPSMITH_DEMUCS_DEVICE=cpu
+# Environment=FEEDBACK_DEMUCS_DEVICE=cpu
 # Optional: set default model
-# Environment=SLOPSMITH_DEMUCS_MODEL=htdemucs_ft
+# Environment=FEEDBACK_DEMUCS_MODEL=htdemucs_ft
 # Optional: enable API key auth
-# Environment=SLOPSMITH_API_KEY=your-secret-key
+# Environment=FEEDBACK_API_KEY=your-secret-key
 
 [Install]
 WantedBy=default.target

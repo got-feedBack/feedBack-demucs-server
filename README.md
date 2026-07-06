@@ -94,7 +94,7 @@ Options:
 | `--api-key` | — | API key for authentication |
 | `--skip-warmup` | — | Skip startup model-weight prefetch |
 
-Environment variables override CLI defaults: `SLOPSMITH_DEMUCS_MODEL`, `SLOPSMITH_DEMUCS_DEVICE`, `SLOPSMITH_API_KEY`.
+Environment variables override CLI defaults: `FEEDBACK_DEMUCS_MODEL`, `FEEDBACK_DEMUCS_DEVICE`, `FEEDBACK_API_KEY`.
 
 ### First-start model weight download
 
@@ -147,13 +147,13 @@ journalctl --user -u feedback-demucs --follow
 ### Build
 
 ```bash
-docker build -t slopsmith-demucs-server .
+docker build -t feedBack-demucs-server .
 ```
 
 ### Run (CPU)
 
 ```bash
-docker run -p 7865:7865 slopsmith-demucs-server
+docker run -p 7865:7865 feedBack-demucs-server
 ```
 
 ### Run (GPU)
@@ -161,7 +161,7 @@ docker run -p 7865:7865 slopsmith-demucs-server
 Requires [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html):
 
 ```bash
-docker run --gpus all -p 7865:7865 slopsmith-demucs-server
+docker run --gpus all -p 7865:7865 feedBack-demucs-server
 ```
 
 ### Docker Compose
@@ -187,22 +187,22 @@ To use a custom host path instead of a named volume (e.g. for Portainer or to sa
 
 ```yaml
 volumes:
-  - /home/AI/feedback-demucs-cache:/app/cache
+  - /absolute/path/to/feedback-demucs-cache:/app/cache
 ```
 
 Then copy the existing cache to the new location:
 ```bash
 # Find old volume path
 docker volume inspect feedback-demucs-server_demucs-cache
- # Copy to new location
- sudo cp -a /var/lib/docker/volumes/feedback-demucs-server_demucs-cache/_data/. /home/AI/feedback-demucs-cache/
+# Copy to new location
+sudo cp -a /var/lib/docker/volumes/feedback-demucs-server_demucs-cache/_data/. /absolute/path/to/feedback-demucs-cache/
 ```
 
 **Cache environment variables** (all redirect to `/app/cache` to prevent container root disk exhaustion):
 
 | Variable | Purpose |
 |----------|---------|
-| `SLOPSMITH_DEMUCS_CACHE` | Server cache root |
+| `FEEDBACK_DEMUCS_CACHE` | Server cache root |
 | `HF_HOME` | HuggingFace model cache |
 | `TORCH_HOME` | PyTorch hub cache |
 | `HUGGINGFACE_HUB_CACHE` | HuggingFace hub downloads |
@@ -230,19 +230,19 @@ The container can automatically check for repository updates and restart. **Disa
 | `UPDATE_TIME` | `04:00` | Time of day to check (HH:MM, 24h) |
 | `UPDATE_CHECK_INTERVAL` | `3600` | Seconds between time checks (3600 = 1 hour) |
 | `SKIP_WARMUP` | `false` | Skip model weight download on startup |
-| `SLOPSMITH_DEMUCS_MODEL` | — | Override default Demucs model |
-| `SLOPSMITH_API_KEY` | — | API authentication key |
+| `FEEDBACK_DEMUCS_MODEL` | — | Override default Demucs model |
+  | `FEEDBACK_API_KEY` | — | API authentication key |
 | `CACHE_TTL` | `24h` | Cache cleanup TTL (`1h`, `12h`, `24h`, or `NEVER` to disable auto-cleanup) |
 | `MODEL_IDLE_TIMEOUT` | `300` | Model idle timeout in seconds (`s`, `m`, `h` suffixes supported; `NEVER` to disable). Unloads WhisperX/CREPE after inactivity to free GPU memory. |
 
 **Disable auto-update** (default — safe for Portainer):
 ```bash
-docker run -e AUTO_UPDATE=false -p 7865:7865 slopsmith-demucs-server
+docker run -e AUTO_UPDATE=false -p 7865:7865 feedBack-demucs-server
 ```
 
 ### Cache cleanup
 
-The server automatically deletes old stem cache directories to prevent disk growth. A background thread runs every 10 minutes, checks each stem cache directory under `SLOPSMITH_DEMUCS_CACHE`, and removes directories older than `CACHE_TTL`.
+The server automatically deletes old stem cache directories to prevent disk growth. A background thread runs every 10 minutes, checks each stem cache directory under `FEEDBACK_DEMUCS_CACHE`, and removes directories older than `CACHE_TTL`.
 
 Model weight caches (`torch/`, `huggingface/`, `locale/`) are **never** deleted — only the stem output cache is cleaned.
 
@@ -253,12 +253,12 @@ Model weight caches (`torch/`, `huggingface/`, `locale/`) are **never** deleted 
 
 **Disable auto-cleanup:**
 ```bash
-docker run -e CACHE_TTL=NEVER -p 7865:7865 slopsmith-demucs-server
+docker run -e CACHE_TTL=NEVER -p 7865:7865 feedBack-demucs-server
 ```
 
 **Set custom TTL (e.g. 12 hours):**
 ```bash
-docker run -e CACHE_TTL=12h -p 7865:7865 slopsmith-demucs-server
+docker run -e CACHE_TTL=12h -p 7865:7865 feedBack-demucs-server
  ```
 
 ### Model idle timeout
@@ -277,7 +277,7 @@ On unload, `torch.cuda.empty_cache()` is called to release GPU memory. Models ar
 
 **Disable model idle timeout:**
 ```bash
-docker run -e MODEL_IDLE_TIMEOUT=NEVER -p 7865:7865 slopsmith-demucs-server
+docker run -e MODEL_IDLE_TIMEOUT=NEVER -p 7865:7865 feedBack-demucs-server
 ```
 
 ### GitHub Container Registry (CI)
@@ -291,7 +291,7 @@ The CI workflow (`.github/workflows/docker-build.yml`) automatically builds the 
 
 **Pull the latest image:**
 ```bash
-docker pull ghcr.io/YOUR_GITHUB_USER/slopsmith-demucs-server:latest
+docker pull ghcr.io/YOUR_GITHUB_USER/feedBack-demucs-server:latest
 ```
 
 **Or from the upstream repo (once PR is merged):**
@@ -302,20 +302,20 @@ docker pull ghcr.io/got-feedback/feedBack-demucs-server:latest
 **Build directly from git (no clone needed):**
 ```bash
 # From upstream main
-docker build -t slopsmith-demucs-server https://github.com/got-feedback/feedBack-demucs-server.git#main
+docker build -t feedBack-demucs-server https://github.com/got-feedback/feedBack-demucs-server.git#main
 
 # From your fork
-docker build -t slopsmith-demucs-server https://github.com/YOUR_USER/slopsmith-demucs-server.git#main
+docker build -t feedBack-demucs-server https://github.com/YOUR_USER/feedBack-demucs-server.git#main
 
 # Run it
-docker run --gpus all -p 7865:7865 slopsmith-demucs-server
+docker run --gpus all -p 7865:7865 feedBack-demucs-server
 ```
 
 **Run via Docker Compose with git build:**
 ```yaml
 services:
-  slopsmith-demucs:
-    build: https://github.com/got-feedback/feedBack-demucs-server.git#main
+feedBack-demucs:
+  build: https://github.com/got-feedback/feedBack-demucs-server.git#main
     ports:
       - "7865:7865"
 ```
@@ -380,6 +380,6 @@ List or inspect separation jobs.
 
 WebSocket for real-time separation progress updates.
 
-### Configure in Slopsmith
+### Configure in feedback
 
-Set the Demucs Server URL to `http://<your-server-ip>:7865` in Slopsmith settings.
+Set the Demucs Server URL to `http://<your-server-ip>:7865` in feedback settings.

@@ -1,23 +1,23 @@
 # ============================================================
-# Slopsmith Demucs Server — Docker Image
+# feedBack Demucs Server — Docker Image
 # ============================================================
 # Build:
-#   docker build -t slopsmith-demucs-server .
+# docker build -t feedback-demucs-server .
 #
 # Run (CPU):
-#   docker run -p 7865:7865 slopsmith-demucs-server
+# docker run -p 7865:7865 feedback-demucs-server
 #
 # Run (GPU — requires nvidia-container-toolkit):
-#   docker run --gpus all -p 7865:7865 slopsmith-demucs-server
+# docker run --gpus all -p 7865:7865 feedback-demucs-server
 # ============================================================
 
 # ---- Base: Python slim ----
 FROM python:3.11-slim-bookworm AS base
 
-LABEL org.opencontainers.image.title="Slopsmith Demucs Server"
-LABEL org.opencontainers.image.description="AI source separation, lyrics alignment, and pitch extraction service for Slopsmith"
+LABEL org.opencontainers.image.title="feedBack Demucs Server"
+LABEL org.opencontainers.image.description="AI source separation, lyrics alignment, and pitch extraction service for feedBack"
 LABEL org.opencontainers.image.source="https://github.com/get-feedback/feedBack-demucs-server"
-LABEL org.opencontainers.image.vendor="Slopsmith"
+LABEL org.opencontainers.image.vendor="feedBack"
 LABEL org.opencontainers.image.licenses="MIT"
 
 # Prevent Python from writing .pyc files & buffer stdout
@@ -89,7 +89,7 @@ ENV PORT=7865 \
     AUTO_UPDATE=false \
     UPDATE_TIME=04:00 \
     UPDATE_CHECK_INTERVAL=3600 \
-    SLOPSMITH_DEMUCS_CACHE=/app/cache \
+    FEEDBACK_DEMUCS_CACHE=/app/cache \
     CACHE_TTL=24h \
     # Redirect HuggingFace and PyTorch caches to the persistent volume
     HF_HOME=/app/cache/huggingface \
