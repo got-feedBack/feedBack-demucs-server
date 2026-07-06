@@ -49,12 +49,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # ---- Install audio-separator separately (onnxruntime dep is fragile on slim) ----
 RUN pip install --no-cache-dir \
-audio-separator>=0.44.0 \
---no-deps \
-&& pip install --no-cache-dir \
-onnxruntime==1.17.1 \
-numpy \
-scipy
+  audio-separator==0.44.0 \
+  --no-deps \
+  && pip install --no-cache-dir \
+  onnxruntime==1.17.1 \
+  numpy \
+  scipy
 
 # ---- Install demucs SEPARATELY to avoid torchaudio version conflict ----
 # demucs 4.0.1 (latest PyPI) requires torchaudio<2.1 which conflicts with

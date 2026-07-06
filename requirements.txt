@@ -2,24 +2,24 @@
 # Slopsmith Demucs Server — Python Dependencies
 # ============================================================
 #
-# ⚠️  CRITICAL: demucs and whisperx have incompatible torchaudio
-#     constraints (demucs needs torchaudio<2.1, whisperx needs
-#     torchaudio~=2.8.x).  Install demucs SEPARATELY (see below).
+# ⚠️ CRITICAL: demucs and whisperx have incompatible torchaudio
+# constraints (demucs needs torchaudio<2.1, whisperx needs
+# torchaudio~=2.8.x). Install demucs SEPARATELY (see below).
 # ============================================================
 
 # ---- Web framework ----
-fastapi>=0.109.1
-uvicorn[standard]>=0.23.0
-python-multipart>=0.0.7
+fastapi==0.109.1
+uvicorn[standard]==0.23.0
+python-multipart==0.0.7
 
 # ---- Audio I/O ----
-soundfile>=0.12.0
+soundfile==0.12.0
 # Roformer / MDXC separation (BS-Roformer-SW etc.) via run_roformer.py.
 # audio-separator is installed separately in the Dockerfile with --no-deps
 # because its onnxruntime dependency is fragile on python:3.11-slim.
 # For onnx-based models on GPU, install the extra instead:
 # pip install "audio-separator[gpu]"
-librosa>=0.10.0
+librosa==0.10.0
 
 # ---- Lyrics alignment ----
 whisperx>=3.8.0
