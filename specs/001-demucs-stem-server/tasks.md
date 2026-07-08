@@ -9,7 +9,7 @@ when it is a real gap.
 
 - [x] **DONE** T001 FastAPI app + CORS + lifespan hooks — `server.py`
 - [x] **DONE** T002 Pin all ML deps with lower bounds — `requirements.txt`
-- [x] **DONE** T003 systemd user-unit for boot — `slopsmith-demucs.service`
+- [x] **DONE** T003 systemd user-unit for boot — `feedback-demucs.service`
 - [x] **DONE** T004 `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`
   set before `import torch` — `server.py` top
 - [x] **DONE** T005 `torch.load` monkey-patch forcing
@@ -18,7 +18,7 @@ when it is a real gap.
 ## Phase 2: Foundational
 
 - [x] **DONE** T006 Cache dir bootstrap (`SLOPSMITH_DEMUCS_CACHE`,
-  default `~/.cache/slopsmith-demucs/`) — `server.py`
+  default `~/.cache/feedback-demucs/`) — `server.py`
 - [x] **DONE** T007 Job table (`OrderedDict`) for `/jobs[/id]` and the
   WebSocket — `server.py`
 - [x] **DONE** T008 [P] `MAX_CONCURRENT=2` queue/gate — `server.py`

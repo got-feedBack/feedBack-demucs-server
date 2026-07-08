@@ -1,22 +1,24 @@
 # ============================================================
-# Slopsmith Demucs Server — Docker Image
+# feedBack Demucs Server — Docker Image
 # ============================================================
 # Build:
-#   docker build -t slopsmith-demucs-server .
+# docker build -t feedback-demucs-server .
 #
 # Run (CPU):
-#   docker run -p 7865:7865 slopsmith-demucs-server
+# docker run -p 7865:7865 feedback-demucs-server
 #
 # Run (GPU — requires nvidia-container-toolkit):
-#   docker run --gpus all -p 7865:7865 slopsmith-demucs-server
+# docker run --gpus all -p 7865:7865 feedback-demucs-server
 # ============================================================
 
 # ---- Base: Python slim ----
-FROM python:3.11-slim AS base
+FROM python:3.11-slim-bookworm AS base
 
-LABEL org.opencontainers.image.title="Slopsmith Demucs Server"
-LABEL org.opencontainers.image.description="AI source separation, lyrics alignment, and pitch extraction service for Slopsmith"
-LABEL org.opencontainers.image.source="https://github.com/byrongamatos/slopsmith-demucs-server"
+LABEL org.opencontainers.image.title="feedBack Demucs Server"
+LABEL org.opencontainers.image.description="AI source separation, lyrics alignment, and pitch extraction service for feedBack"
+LABEL org.opencontainers.image.source="https://github.com/get-feedback/feedBack-demucs-server"
+LABEL org.opencontainers.image.vendor="feedBack"
+LABEL org.opencontainers.image.licenses="MIT"
 
 # Prevent Python from writing .pyc files & buffer stdout
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -24,11 +26,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 # ---- System dependencies ----
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update \
+&& apt-get install -y --no-install-recommends \
 ffmpeg \
 git \
 libgomp1 \
-&& rm -rf /var/lib/apt/lists/*
+&& rm -rf /var/lib/apt/lists/* \
+&& apt-get clean
 
 # ---- Application directory ----
 WORKDIR /app
@@ -36,18 +40,21 @@ WORKDIR /app
 # ---- COPY requirements first (leverage Docker layer cache) ----
 COPY requirements.txt .
 
+# Upgrade pip tooling to reduce known vulnerabilities in old pip/setuptools
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
 # ---- Install main Python dependencies ----
 # whisperx pins torch~=2.8.0 + torchaudio~=2.8.0 — this satisfies torchcrepe too.
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ---- Install audio-separator separately (onnxruntime dep is fragile on slim) ----
 RUN pip install --no-cache-dir \
-audio-separator>=0.44.0 \
---no-deps \
-&& pip install --no-cache-dir \
-onnxruntime \
-numpy \
-scipy
+  audio-separator==0.44.0 \
+  --no-deps \
+  && pip install --no-cache-dir \
+  onnxruntime==1.17.1 \
+  numpy \
+  scipy
 
 # ---- Install demucs SEPARATELY to avoid torchaudio version conflict ----
 # demucs 4.0.1 (latest PyPI) requires torchaudio<2.1 which conflicts with
@@ -82,7 +89,7 @@ ENV PORT=7865 \
     AUTO_UPDATE=false \
     UPDATE_TIME=04:00 \
     UPDATE_CHECK_INTERVAL=3600 \
-    SLOPSMITH_DEMUCS_CACHE=/app/cache \
+    FEEDBACK_DEMUCS_CACHE=/app/cache \
     CACHE_TTL=24h \
     # Redirect HuggingFace and PyTorch caches to the persistent volume
     HF_HOME=/app/cache/huggingface \

@@ -80,7 +80,7 @@ DEMUCS_DEVICE = os.environ.get("SLOPSMITH_DEMUCS_DEVICE", "")
 API_KEY = os.environ.get("SLOPSMITH_API_KEY", "")
 CACHE_DIR = Path(os.environ.get(
     "SLOPSMITH_DEMUCS_CACHE",
-    Path.home() / ".cache" / "slopsmith-demucs",
+    Path.home() / ".cache" / "feedback-demucs",
 ))
 MAX_CONCURRENT = 2
 CACHE_TTL = os.environ.get("CACHE_TTL", "24h")
@@ -111,49 +111,6 @@ if CACHE_TTL_SECONDS is not None:
     print(f"[cache] TTL={CACHE_TTL} ({CACHE_TTL_SECONDS}s)")
 else:
     print("[cache] Cleanup disabled (CACHE_TTL=NEVER)")
-
-# ── Model idle-unload configuration ──────────────────────────────────────
-# Background thread (_model_idle_loop) unloads WhisperX ASR / aligner and
-# CREPE models that have been idle longer than this timeout, so a mostly-idle
-# server doesn't pin several GB of weights forever. Default 300s (5 min);
-# set MODEL_IDLE_TIMEOUT=NEVER to disable idle unloading.
-MODEL_IDLE_TIMEOUT = os.environ.get("MODEL_IDLE_TIMEOUT", "300")
-
-
-def _parse_model_idle_timeout(val: str) -> int | None:
-    """Parse MODEL_IDLE_TIMEOUT into seconds.
-
-    'NEVER' (case-insensitive) disables idle unloading (returns None).
-    Accepts a plain integer number of seconds (e.g. '300') or a duration
-    with an s/m/h/d suffix (e.g. '90s', '5m', '1h'). Invalid values fall
-    back to the 300s default.
-    """
-    val = val.strip()
-    if val.upper() == "NEVER":
-        return None
-    m = re.match(r"^(\d+)\s*([smhd]?)$", val)
-    if not m:
-        print(f"[model-idle] WARNING: Invalid MODEL_IDLE_TIMEOUT={val!r}, "
-              f"defaulting to 300s")
-        return 300
-    value = int(m.group(1))
-    unit = m.group(2) or "s"
-    multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
-    return value * multipliers[unit]
-
-
-_model_idle_timeout = _parse_model_idle_timeout(MODEL_IDLE_TIMEOUT)
-if _model_idle_timeout is not None:
-    print(f"[model-idle] Idle unload timeout={MODEL_IDLE_TIMEOUT} "
-          f"({_model_idle_timeout}s)")
-else:
-    print("[model-idle] Idle unloading disabled (MODEL_IDLE_TIMEOUT=NEVER)")
-
-# Per-model last-use timestamps ({model_name: epoch_seconds}) and the lock
-# guarding them. Written by _touch_model on every model use and read by the
-# _model_idle_loop daemon thread.
-_model_last_used: dict[str, float] = {}
-_model_idle_lock = threading.Lock()
 
 CACHE_MAX_COMPLETED_JOBS = _parse_cache_max_completed_jobs(
     os.environ.get("SLOPSMITH_DEMUCS_CACHE_MAX_JOBS")
@@ -455,6 +412,7 @@ _whisperx_aligners_lock = threading.Lock()
 # the same wav2vec2 weights (latency spike, possible GPU OOM).
 _whisperx_aligner_locks: dict[str, threading.Lock] = {}
 _whisperx_aligner_locks_guard = threading.Lock()
+_crepe_model = None
 
 def _get_aligner_load_lock(lang: str) -> threading.Lock:
     """Return the lock that serialises load_align_model calls for one
@@ -699,23 +657,16 @@ def _unload_whisperx_aligner(lang: str) -> None:
     print(f"[model-idle] Unloaded whisperx aligner: {lang}", flush=True)
 
 def _unload_crepe() -> None:
-    """Unload the CREPE pitch model from memory.
-
-    We never hold a reference to the CREPE network ourselves: torchcrepe
-    lazily loads it the first time ``torchcrepe.predict`` /
-    ``torchcrepe.load.model`` runs and caches it as a module-level global
-    (``torchcrepe.infer.model``). Clearing that global is therefore what
-    actually frees the weights; nulling a local would free nothing.
-    """
-    freed = getattr(torchcrepe.infer, "model", None) is not None
-    torchcrepe.infer.model = None
+    """Unload the CREPE pitch model from memory."""
+    global _crepe_model
+    if _crepe_model is not None:
+        _crepe_model = None
     if _crepe_device().startswith("cuda"):
         try:
             torch.cuda.empty_cache()
         except Exception:
             pass
-    if freed:
-        print("[model-idle] Unloaded CREPE model", flush=True)
+    print("[model-idle] Unloaded CREPE model", flush=True)
 
 
 
@@ -2085,10 +2036,9 @@ def _cache_cleanup_loop() -> None:
 
 def _model_idle_loop() -> None:
     """Background daemon thread: unload models idle longer than MODEL_IDLE_TIMEOUT.
-    Checks every 60 seconds. All WhisperX aligners share the one aggregate
-    "whisperx_aligner" idle key, so when it expires every loaded aligner is
-    idle and they are all evicted; the ASR model and CREPE are evicted as
-    whole units. Only runs if MODEL_IDLE_TIMEOUT is set (not NEVER).
+    Checks every 60 seconds. WhisperX aligners are evicted individually by language
+    (oldest first); the ASR model and CREPE are evicted as whole units.
+    Only runs if MODEL_IDLE_TIMEOUT is set (not NEVER).
     """
     if _model_idle_timeout is None:
         return
@@ -2110,16 +2060,10 @@ def _model_idle_loop() -> None:
                 if name == "whisperx":
                     _unload_whisperx_model()
                 elif name == "whisperx_aligner":
-                    # Every language is tracked under this single aggregate key,
-                    # so an idle timeout means all loaded aligners are idle —
-                    # evict them all, not just the oldest. Snapshot the languages
-                    # under the lock, then unload each WITHOUT holding it, since
-                    # _unload_whisperx_aligner re-acquires the same
-                    # (non-reentrant) _whisperx_aligners_lock.
                     with _whisperx_aligners_lock:
-                        idle_langs = list(_whisperx_aligners.keys())
-                    for lang in idle_langs:
-                        _unload_whisperx_aligner(lang)
+                        if _whisperx_aligners:
+                            oldest_lang = next(iter(_whisperx_aligners))
+                            _unload_whisperx_aligner(oldest_lang)
                 elif name == "crepe":
                     _unload_crepe()
                 with _model_idle_lock:

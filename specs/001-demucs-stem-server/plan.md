@@ -8,7 +8,7 @@
 A single FastAPI process exposing three ML endpoints (`/separate`,
 `/align`, `/pitch`) plus job/health/download support. The whole server
 lives in `server.py` (~1.7k LOC). It is meant to be co-located with a
-CUDA GPU and called over HTTP from a Slopsmith instance running anywhere.
+CUDA GPU and called over HTTP from a feedback instance running anywhere.
 
 ## Technical Context
 
@@ -16,19 +16,19 @@ CUDA GPU and called over HTTP from a Slopsmith instance running anywhere.
 **Primary Dependencies**: FastAPI, uvicorn, demucs, torch, whisperx,
 torchcrepe, librosa, soundfile, pyphen, python-multipart (see
 `requirements.txt`).
-**Storage**: Filesystem cache at `SLOPSMITH_DEMUCS_CACHE`
-(default `~/.cache/slopsmith-demucs/`). No DB.
+**Storage**: Filesystem cache at `FEEDBACK_DEMUCS_CACHE`
+(default `~/.cache/feedback-demucs/`). No DB.
 **Testing**: [NEEDS CLARIFICATION: no test suite present in repo.]
 **Target Platform**: Linux desktop with NVIDIA GPU (CPU fallback).
 Deployed as a user-level systemd service via
-`slopsmith-demucs.service`.
+`feedback-demucs.service`.
 **Project Type**: Single-service backend (HTTP).
 **Performance Goals**: 4-minute song separates in under 30 s on a
 modern CUDA GPU once warm; `/health` responds within 50 ms.
 **Constraints**: ≤10 GB VRAM target; `expandable_segments` mandatory.
 Total weight footprint ~1.5 GB across four models. `MAX_CONCURRENT=2`
 heavy jobs.
-**Scale/Scope**: Single-tenant, single-host. Slopsmith ecosystem
+**Scale/Scope**: Single-tenant, single-host. feedback ecosystem
 dictates request volume — typically a handful of separations per song
 ingestion, plus on-the-fly `/align` and `/pitch` calls per song.
 
@@ -49,11 +49,11 @@ No deviations.
 ## Project Structure
 
 ```
-slopsmith-demucs-server/
+feedback-demucs-server/
 ├── server.py                    # The whole server. ~1.7k LOC.
 ├── run_demucs.py                # Standalone separator subprocess driver. ~70 LOC.
 ├── requirements.txt
-├── slopsmith-demucs.service     # systemd user-unit
+├── feedback-demucs.service # systemd user-unit
 ├── README.md
 └── CLAUDE.md
 ```
@@ -172,12 +172,12 @@ positional/keyword signature so libraries that explicitly pass
 
 ## Slopsmith Ecosystem Integration
 
-- **Slopsmith server**: configured via Slopsmith Settings →
+- **feedback server**: configured via feedback Settings →
   "Demucs Server URL". When unset, stem-aware features degrade to
   `.sloppak`-baked stems only.
 - **Lyrics Sync plugin**: calls `/align` for line/word timestamps.
 - **Lyrics Karaoke plugin**: calls `/align` for syllables + `/pitch`
   for MIDI bars.
-- **Slopsmith Demo**: deliberately ships *without* this server —
+- **feedback Demo**: deliberately ships *without* this server —
   demo uses pre-baked `lyrics.json` + `vocal_pitch.json` inside the
   bundled `.sloppak`. See `slopsmith-demo/README.md` "What's blocked".

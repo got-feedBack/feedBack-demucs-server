@@ -1,5 +1,5 @@
 # ============================================================
-# Slopsmith Demucs Server — Docker Compose
+# feedBack Demucs Server — Docker Compose
 # ============================================================
 # Usage (CLI):
 #   docker compose up -d                    # Pull from GHCR + run
@@ -15,19 +15,19 @@
 # ============================================================
 
 services:
-  slopsmith-demucs:
+  feedBack-demucs:
     # ── Pre-built image from GHCR (CI builds on every push to main) ──
-    image: ghcr.io/byrongamatos/slopsmith-demucs-server:latest
+    image: ghcr.io/got-feedback/feedback-demucs-server:latest
 
     # ── OR build from git URL ──
-    # build: https://github.com/byrongamatos/slopsmith-demucs-server.git#main
+    # build: https://github.com/got-feedback/feedback-demucs-server.git#main
 
     # ── OR build from local Dockerfile ──
     # build:
     #   context: .
     #   dockerfile: Dockerfile
 
-    container_name: slopsmith-demucs-server
+    container_name: feedback-demucs-server
     restart: unless-stopped
     ports:
       - "7865:7865"
@@ -52,13 +52,13 @@ services:
       - AUTO_UPDATE=false
       - UPDATE_TIME=04:00
       - UPDATE_CHECK_INTERVAL=3600
-      - SLOPSMITH_DEMUCS_MODEL=htdemucs_ft
+      - FEEDBACK_DEMUCS_MODEL=htdemucs_ft
       - SKIP_WARMUP=false
       # Cache cleanup TTL: auto-delete stems older than this (1h, 12h, 24h, NEVER)
       - CACHE_TTL=24h
       # Cache directories — redirect all model downloads to the
       # persistent volume so they survive container restarts:
-      - SLOPSMITH_DEMUCS_CACHE=/app/cache
+      - FEEDBACK_DEMUCS_CACHE=/app/cache
       - TORCH_HOME=/app/cache/torch
       - HF_HOME=/app/cache/huggingface
       - HUGGINGFACE_HUB_CACHE=/app/cache/huggingface/hub
