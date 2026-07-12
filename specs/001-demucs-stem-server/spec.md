@@ -3,15 +3,15 @@
 **Feature Branch**: `001-demucs-stem-server` (retrospective)
 **Created**: 2026-05-09
 **Status**: Implemented (documented after the fact)
-**Input**: A GPU-hosting service that gives Slopsmith on-demand source
+**Input**: A GPU-hosting service that gives feedBack on-demand source
 separation, lyrics alignment, and per-syllable pitch over HTTP.
 
 ## User Scenarios & Testing
 
 ### User Story 1 — Separate a song into stems on demand (Priority: P1)
 
-A Slopsmith user has a song with no pre-baked stems. They want to play
-along with just the bass, or strip the vocals for karaoke. The Slopsmith
+A feedBack user has a song with no pre-baked stems. They want to play
+along with just the bass, or strip the vocals for karaoke. The feedBack
 server forwards the audio to this Demucs server, which returns
 per-stem files; the response is cached so re-requests are instant.
 
@@ -47,7 +47,7 @@ timestamps so the Lyrics-Karaoke plugin can highlight syllables as they
 are sung.
 
 **Why this priority**: Karaoke and lyrics-sync features depend on
-this. Without `/align` the karaoke plugin shipped by Slopsmith is
+this. Without `/align` the karaoke plugin shipped by feedBack is
 ornamental.
 
 **Independent Test**: `POST /align` with a vocals stem,
@@ -146,7 +146,7 @@ possible, and that genuinely unvoiced tokens are omitted.
   semitones around the song-wide median and apply octave-error
   correction.
 - **FR-011**: System MUST accept an optional API key
-  (`SLOPSMITH_API_KEY` / `--api-key`) shared across all endpoints.
+  (`FEEDBACK_API_KEY` / `--api-key`) shared across all endpoints.
   [NEEDS CLARIFICATION: bearer header? Custom header? README does not
   pin this down.]
 - **FR-012**: System MUST cap concurrent heavy jobs at
@@ -196,9 +196,9 @@ possible, and that genuinely unvoiced tokens are omitted.
 
 - Operator owns the GPU host and has accepted the trust assumption
   on torchaudio / demucs / HuggingFace checkpoints.
-- Disk under `SLOPSMITH_DEMUCS_CACHE` is large enough to hold cached
+- Disk under `FEEDBACK_DEMUCS_CACHE` is large enough to hold cached
   stems for the songs the user actually plays. No automatic eviction.
-- Audio uploaded by Slopsmith is something `librosa` / `ffmpeg` can
+- Audio uploaded by feedBack is something `librosa` / `ffmpeg` can
   read.
-- Slopsmith trusts the network path (no TLS in-process; reverse
+- feedBack trusts the network path (no TLS in-process; reverse
   proxy if you need it).

@@ -144,15 +144,15 @@ class TestRequirementsPins:
         )
 
 
-# ── slopsmith-demucs.service systemd config ────────────────────────────
+# ── feedBack-demucs.service systemd config ────────────────────────────
 
 class TestServiceFile:
     """Systemd service file must have correct network ordering."""
 
-    SERVICE_PATH = Path(__file__).parent.parent / "slopsmith-demucs.service"
+    SERVICE_PATH = Path(__file__).parent.parent / "feedBack-demucs.service"
 
     def test_service_file_exists(self):
-        assert self.SERVICE_PATH.exists(), "slopsmith-demucs.service not found"
+        assert self.SERVICE_PATH.exists(), "feedBack-demucs.service not found"
 
     def test_after_includes_network_online(self):
         """After= must reference both network.target AND network-online.target

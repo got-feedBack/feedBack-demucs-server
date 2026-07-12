@@ -9,7 +9,7 @@ when it is a real gap.
 
 - [x] **DONE** T001 FastAPI app + CORS + lifespan hooks — `server.py`
 - [x] **DONE** T002 Pin all ML deps with lower bounds — `requirements.txt`
-- [x] **DONE** T003 systemd user-unit for boot — `slopsmith-demucs.service`
+- [x] **DONE** T003 systemd user-unit for boot — `feedBack-demucs.service`
 - [x] **DONE** T004 `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`
   set before `import torch` — `server.py` top
 - [x] **DONE** T005 `torch.load` monkey-patch forcing
@@ -17,8 +17,8 @@ when it is a real gap.
 
 ## Phase 2: Foundational
 
-- [x] **DONE** T006 Cache dir bootstrap (`SLOPSMITH_DEMUCS_CACHE`,
-  default `~/.cache/slopsmith-demucs/`) — `server.py`
+- [x] **DONE** T006 Cache dir bootstrap (`FEEDBACK_DEMUCS_CACHE`,
+  default `~/.cache/feedBack-demucs/`) — `server.py`
 - [x] **DONE** T007 Job table (`OrderedDict`) for `/jobs[/id]` and the
   WebSocket — `server.py`
 - [x] **DONE** T008 [P] `MAX_CONCURRENT=2` queue/gate — `server.py`
@@ -27,7 +27,7 @@ when it is a real gap.
 - [x] **DONE** T010 [P] WhisperX wav2vec2 aligner LRU — `server.py`
 - [ ] **OPEN** T011 [P] Test harness (`tests/`) — none present.
   Without this, regressions in pitch aggregation / align granularity
-  are caught only by Slopsmith-side smoke runs.
+  are caught only by feedBack-side smoke runs.
 
 ## Phase 3: User Story 1 — Stem separation (P1)
 

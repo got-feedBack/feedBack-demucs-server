@@ -1,7 +1,7 @@
-"""Slopsmith Demucs Separation Service.
+"""feedBack Demucs Separation Service.
 
 Lightweight HTTP server that runs demucs source separation.
-Designed to run on a desktop with GPU/RAM while Slopsmith runs on a NAS.
+Designed to run on a desktop with GPU/RAM while feedBack runs on a NAS.
 
 Usage:
     python server.py --port 7865
@@ -75,12 +75,12 @@ def _parse_cache_max_completed_jobs(value: str | None) -> int:
 
 # ── Configuration ───────────────────────────────────────────────────────
 
-DEMUCS_MODEL = os.environ.get("SLOPSMITH_DEMUCS_MODEL", "htdemucs_ft")
-DEMUCS_DEVICE = os.environ.get("SLOPSMITH_DEMUCS_DEVICE", "")
-API_KEY = os.environ.get("SLOPSMITH_API_KEY", "")
+DEMUCS_MODEL = os.environ.get("FEEDBACK_DEMUCS_MODEL", "htdemucs_ft")
+DEMUCS_DEVICE = os.environ.get("FEEDBACK_DEMUCS_DEVICE", "")
+API_KEY = os.environ.get("FEEDBACK_API_KEY", "")
 CACHE_DIR = Path(os.environ.get(
-    "SLOPSMITH_DEMUCS_CACHE",
-    Path.home() / ".cache" / "slopsmith-demucs",
+    "FEEDBACK_DEMUCS_CACHE",
+    Path.home() / ".cache" / "feedBack-demucs",
 ))
 MAX_CONCURRENT = 2
 CACHE_TTL = os.environ.get("CACHE_TTL", "24h")
@@ -156,7 +156,7 @@ _model_last_used: dict[str, float] = {}
 _model_idle_lock = threading.Lock()
 
 CACHE_MAX_COMPLETED_JOBS = _parse_cache_max_completed_jobs(
-    os.environ.get("SLOPSMITH_DEMUCS_CACHE_MAX_JOBS")
+    os.environ.get("FEEDBACK_DEMUCS_CACHE_MAX_JOBS")
 )
 
 # ── Separation model registry ───────────────────────────────────────────
@@ -199,7 +199,7 @@ def _job_id_for(audio_hash: str, model: str) -> str:
 
 # ── State ───────────────────────────────────────────────────────────────
 
-app = FastAPI(title="Slopsmith Demucs Server")
+app = FastAPI(title="feedBack Demucs Server")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -437,10 +437,10 @@ _whisperx_model_name = "medium"
 # when the cap is exceeded.
 _MAX_WHISPERX_ALIGNERS_DEFAULT = 4
 try:
-    MAX_WHISPERX_ALIGNERS = max(1, int(os.environ.get("SLOPSMITH_MAX_WHISPERX_ALIGNERS", str(_MAX_WHISPERX_ALIGNERS_DEFAULT))))
+    MAX_WHISPERX_ALIGNERS = max(1, int(os.environ.get("FEEDBACK_MAX_WHISPERX_ALIGNERS", str(_MAX_WHISPERX_ALIGNERS_DEFAULT))))
 except (ValueError, TypeError):
     print(
-        f"[server] WARNING: SLOPSMITH_MAX_WHISPERX_ALIGNERS is not a valid integer; "
+        f"[server] WARNING: FEEDBACK_MAX_WHISPERX_ALIGNERS is not a valid integer; "
         f"using default ({_MAX_WHISPERX_ALIGNERS_DEFAULT})",
         flush=True,
     )
@@ -1666,7 +1666,7 @@ def _initialize_cache_order():
 
     Returns the number of pre-existing cache entries pruned to honor the
     limit, so startup can tell the operator when boot deleted cached stems
-    (e.g. after lowering SLOPSMITH_DEMUCS_CACHE_MAX_JOBS).
+    (e.g. after lowering FEEDBACK_DEMUCS_CACHE_MAX_JOBS).
     """
     cache_entries = []
     for path in CACHE_DIR.iterdir():
@@ -2133,7 +2133,7 @@ def _model_idle_loop() -> None:
 def main():
     global _model, _device, _gpu_available, API_KEY
 
-    parser = argparse.ArgumentParser(description="Slopsmith Demucs Separation Service")
+    parser = argparse.ArgumentParser(description="feedBack Demucs Separation Service")
     parser.add_argument("--port", type=int, default=7865, help="Port to listen on")
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
     parser.add_argument("--model", default="", help="Demucs model (htdemucs, mdx_extra)")
@@ -2162,7 +2162,7 @@ def main():
     ROFORMER_MODEL_DIR.mkdir(parents=True, exist_ok=True)
     _pruned_at_startup = _initialize_cache_order()
 
-    print(f"Slopsmith Demucs Server starting on {args.host}:{args.port}")
+    print(f"feedBack Demucs Server starting on {args.host}:{args.port}")
     print(f"  Model: {_model}")
     print(f"  Device: {_device} (GPU: {_gpu_available})")
     print(f"  Cache: {CACHE_DIR}")
