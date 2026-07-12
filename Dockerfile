@@ -14,9 +14,11 @@
 # ---- Base: Python slim ----
 FROM python:3.11-slim AS base
 
-LABEL org.opencontainers.image.title="Slopsmith Demucs Server"
-LABEL org.opencontainers.image.description="AI source separation, lyrics alignment, and pitch extraction service for Slopsmith"
-LABEL org.opencontainers.image.source="https://github.com/byrongamatos/slopsmith-demucs-server"
+LABEL org.opencontainers.image.title="feedBack Demucs Server"
+LABEL org.opencontainers.image.description="AI source separation, lyrics alignment, and pitch extraction service for feedBack"
+# image.source is what links the published package to this repo on GHCR - it must
+# point at the repo that actually builds it, or the package is orphaned.
+LABEL org.opencontainers.image.source="https://github.com/got-feedBack/feedBack-demucs-server"
 
 # Prevent Python from writing .pyc files & buffer stdout
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -38,16 +40,17 @@ COPY requirements.txt .
 
 # ---- Install main Python dependencies ----
 # whisperx pins torch~=2.8.0 + torchaudio~=2.8.0 — this satisfies torchcrepe too.
+# requirements.txt deliberately does NOT list audio-separator or demucs; both are
+# installed --no-deps below. See the ⚠️ note at the top of that file.
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ---- Install audio-separator separately (onnxruntime dep is fragile on slim) ----
-RUN pip install --no-cache-dir \
-audio-separator>=0.44.0 \
---no-deps \
-&& pip install --no-cache-dir \
-onnxruntime \
-numpy \
-scipy
+# ---- Install audio-separator SEPARATELY, with --no-deps ----
+# Its metadata requires `diffq` on non-Windows, a C-extension whose newest wheels
+# stop at cp310. On this python:3.11 base pip finds no wheel, falls back to the
+# sdist and tries to compile it — and this image has no gcc (deliberately: adding a
+# toolchain to ship one optional quantizer is the wrong trade). That compile is what
+# broke every image build. Its real deps are in requirements.txt instead.
+RUN pip install --no-cache-dir --no-deps "audio-separator>=0.44.0"
 
 # ---- Install demucs SEPARATELY to avoid torchaudio version conflict ----
 # demucs 4.0.1 (latest PyPI) requires torchaudio<2.1 which conflicts with
@@ -64,6 +67,20 @@ RUN pip install --no-cache-dir \
         pyyaml \
         tqdm \
         dora-search
+
+# ---- diffq: BINARY-ONLY, and optional ----
+# Needed only to load QUANTIZED demucs checkpoints. `demucs` guards its import and
+# audio-separator only reaches for it from its bundled demucs architecture — neither
+# is on the bs_roformer_sw path, which is what the app splits with.
+#
+# --only-binary=:all: is the point: it makes pip FAIL rather than silently fall back
+# to the sdist, so a missing wheel can never reintroduce a source build here. On this
+# base (glibc >= 2.28, cp311) `diffq-fixed` has a manylinux_2_28 wheel; it installs
+# under the module name `diffq`, so it satisfies the import just like the original.
+# `|| true`: if that ever stops being true, the image still builds, minus quantized
+# demucs models.
+RUN pip install --no-cache-dir --no-deps --only-binary=:all: "diffq-fixed>=0.2" \
+    || echo "WARNING: no diffq wheel for this interpreter - quantized demucs checkpoints will not load (bs_roformer_sw is unaffected)"
 
 # ---- COPY application code ----
 COPY . .

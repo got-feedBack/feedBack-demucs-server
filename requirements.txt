@@ -1,10 +1,14 @@
 # ============================================================
-# Slopsmith Demucs Server — Python Dependencies
+# feedBack Demucs Server — Python Dependencies
 # ============================================================
 #
-# ⚠️  CRITICAL: demucs and whisperx have incompatible torchaudio
-#     constraints (demucs needs torchaudio<2.1, whisperx needs
-#     torchaudio~=2.8.x).  Install demucs SEPARATELY (see below).
+# ⚠️  CRITICAL: two packages must be installed SEPARATELY, with --no-deps.
+#     Both are documented below and in the README/Dockerfile. Adding either
+#     of them to this file re-breaks the build — see why below.
+#
+#     1. demucs          — pins torchaudio<2.1, whisperx needs ~2.8.x
+#     2. audio-separator — its deps drag in `diffq`, which has no wheel for
+#                          Python 3.11+ and so tries to compile from source
 # ============================================================
 
 # ---- Web framework ----
@@ -14,11 +18,6 @@ python-multipart>=0.0.7
 
 # ---- Audio I/O ----
 soundfile>=0.12.0
-# Roformer / MDXC separation (BS-Roformer-SW etc.) via run_roformer.py.
-# Roformer inference runs on torch/CUDA; the bundled onnxruntime (CPU) is
-# only used by other audio-separator models. For onnx-based models on GPU,
-# install the extra instead:  pip install "audio-separator[gpu]"
-audio-separator>=0.44.0
 librosa>=0.10.0
 
 # ---- Lyrics alignment ----
@@ -27,3 +26,46 @@ pyphen>=0.14.0
 
 # ---- Pitch extraction ----
 torchcrepe>=0.0.20
+
+# ============================================================
+# audio-separator's dependencies — see the ⚠️ note at the top
+# ============================================================
+#
+# Roformer / MDXC separation (BS-Roformer-SW etc.) via run_roformer.py.
+#
+# audio-separator itself is NOT listed here. It is installed with --no-deps
+# (Dockerfile / README step 2) because its metadata says:
+#
+#     Requires-Dist: diffq (>=0.2)        ; sys_platform != "win32"
+#     Requires-Dist: diffq-fixed (>=0.2)  ; sys_platform == "win32"
+#
+# `diffq` is a C-extension whose newest wheels stop at **cp310**. On any Python
+# 3.11+ — including the python:3.11-slim base image — pip finds no wheel, falls
+# back to the sdist, and tries to compile it. The image has no gcc (deliberately),
+# so `pip install -r requirements.txt` died with:
+#
+#     error: command 'gcc' failed: No such file or directory
+#     ERROR: Could not build wheels for diffq
+#
+# That is why the GHCR image had not published since the diffq pin appeared: the
+# `-r` file is resolved FIRST, so diffq was dragged in and the build failed long
+# before the Dockerfile's careful `--no-deps` lines could run. They were dead code.
+#
+# So audio-separator's real runtime deps are listed here instead, and it is
+# installed --no-deps on top. Keep this list in sync when bumping audio-separator
+# (`pip show -f audio-separator`, or read its METADATA Requires-Dist).
+beartype>=0.18.5,<0.19.0
+ml_collections
+onnx-weekly
+onnx2torch-py313>=1.6
+onnxruntime>=1.17
+pydub>=0.25
+requests>=2
+resampy>=0.4
+rotary-embedding-torch>=0.6.1,<0.7.0
+samplerate==0.1.0
+six>=1.16
+audioop-lts>=0.2.1; python_version >= "3.13"
+
+# NOTE: einops, julius, numpy, pyyaml, scipy and tqdm are shared with demucs and
+# come in via its extras (Dockerfile / README step 2). torch comes from whisperx.

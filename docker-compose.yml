@@ -1,5 +1,5 @@
 # ============================================================
-# Slopsmith Demucs Server — Docker Compose
+# feedBack Demucs Server — Docker Compose
 # ============================================================
 # Usage (CLI):
 #   docker compose up -d                    # Pull from GHCR + run
@@ -15,19 +15,19 @@
 # ============================================================
 
 services:
-  slopsmith-demucs:
+  feedback-demucs:
     # ── Pre-built image from GHCR (CI builds on every push to main) ──
-    image: ghcr.io/byrongamatos/slopsmith-demucs-server:latest
+    image: ghcr.io/got-feedback/feedback-demucs-server:latest
 
     # ── OR build from git URL ──
-    # build: https://github.com/byrongamatos/slopsmith-demucs-server.git#main
+    # build: https://github.com/got-feedBack/feedBack-demucs-server.git#main
 
     # ── OR build from local Dockerfile ──
     # build:
     #   context: .
     #   dockerfile: Dockerfile
 
-    container_name: slopsmith-demucs-server
+    container_name: feedback-demucs-server
     restart: unless-stopped
     ports:
       - "7865:7865"
@@ -52,7 +52,10 @@ services:
       - AUTO_UPDATE=false
       - UPDATE_TIME=04:00
       - UPDATE_CHECK_INTERVAL=3600
-      - SLOPSMITH_DEMUCS_MODEL=htdemucs_ft
+      # The model feedBack splits with. Warmup only prefetches the DEFAULT model,
+      # so setting this is what makes the first split fast rather than a cold
+      # multi-GB download at the worst possible moment.
+      - SLOPSMITH_DEMUCS_MODEL=bs_roformer_sw
       - SKIP_WARMUP=false
       # Cache cleanup TTL: auto-delete stems older than this (1h, 12h, 24h, NEVER)
       - CACHE_TTL=24h
@@ -64,12 +67,23 @@ services:
       - HUGGINGFACE_HUB_CACHE=/app/cache/huggingface/hub
       # - SLOPSMITH_API_KEY=your-secret-key
 
-    # ── GPU support (requires nvidia-container-toolkit) ──
-    # Uncomment the lines below for GPU acceleration:
-    # runtime: nvidia
-    # environment:
-    #   - NVIDIA_VISIBLE_DEVICES=all
-    #   - NVIDIA_DRIVER_CAPABILITIES=all
+      # ── GPU (see below) ──
+      # - NVIDIA_VISIBLE_DEVICES=all
+      # - NVIDIA_DRIVER_CAPABILITIES=all
+
+    # ── GPU support ──
+    # Uncomment the line below for GPU acceleration. Requirements:
+    #   * an NVIDIA GPU + driver on the HOST
+    #   * nvidia-container-toolkit installed on the host
+    #   * Linux, or Windows via the WSL2 backend. NOT macOS — Docker there is a
+    #     Linux VM with no GPU passthrough, so a Mac is always CPU.
+    # No CUDA toolkit is needed inside the image: the torch wheel bundles the
+    # runtime. Verify it took with `curl localhost:7865/health` — it reports
+    # `gpu` and `device`.
+    #
+    # (`gpus:` is the modern spelling. The old `runtime: nvidia` still works on
+    # some setups but is deprecated.)
+    # gpus: all
 
 volumes:
   demucs-cache:

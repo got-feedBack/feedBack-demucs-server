@@ -2,14 +2,22 @@
 # Docker Build, SBOM & Security Scan — Slopsmith Demucs Server
 # ============================================================
 # Builds Docker image, generates SBOM, scans for vulnerabilities:
-#   - On every push to main branch
+#   - On every pull request (build + scan only, no push)
+#   - On every push to main branch (build + scan + push to GHCR)
 #   - On demand via workflow_dispatch
+#
+# The pull_request trigger is deliberate: this workflow was silently failing on
+# main for weeks (a dependency that needed a C compiler the image doesn't have),
+# and nothing caught it because the image was only ever built AFTER merge. A build
+# that only runs post-merge cannot gate anything.
 # ============================================================
 
 name: Docker Build + Security Scan
 
 on:
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
   workflow_dispatch:
 
@@ -48,6 +56,7 @@ jobs:
           SHA: ${{ github.sha }}
 
       - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
         with:
           registry: ${{ env.REGISTRY }}
@@ -59,7 +68,9 @@ jobs:
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
           context: .
-          push: true
+          # Build on PRs to gate them, but only publish from main. A PR from a fork
+          # has a read-only GITHUB_TOKEN and could not push anyway.
+          push: ${{ github.event_name != 'pull_request' }}
           tags: |
             ${{ steps.tag.outputs.tag }}
             ${{ github.ref == 'refs/heads/main' && format('{0}:latest', steps.tag.outputs.image) || '' }}
