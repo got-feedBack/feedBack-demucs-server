@@ -50,10 +50,19 @@ jobs:
           REPO_LC="${REPO_OWNER,,}/${REPO_NAME,,}"
           echo "image=ghcr.io/${REPO_LC}" >> "$GITHUB_OUTPUT"
           echo "tag=ghcr.io/${REPO_LC}:${SHA}" >> "$GITHUB_OUTPUT"
+          # What the SBOM/scan steps look at. On a PR nothing is pushed, so they must
+          # read the image from the local docker daemon (see `load:` below) instead of
+          # pulling it back from a registry it was never sent to.
+          if [ "${EVENT}" = "pull_request" ]; then
+            echo "scan=${REPO_NAME,,}:pr-${{ github.event.number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "scan=ghcr.io/${REPO_LC}:${SHA}" >> "$GITHUB_OUTPUT"
+          fi
         env:
           REPO_OWNER: ${{ github.repository_owner }}
           REPO_NAME: ${{ github.event.repository.name }}
           SHA: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
 
       - name: Log in to GitHub Container Registry
         if: github.event_name != 'pull_request'
@@ -71,8 +80,13 @@ jobs:
           # Build on PRs to gate them, but only publish from main. A PR from a fork
           # has a read-only GITHUB_TOKEN and could not push anyway.
           push: ${{ github.event_name != 'pull_request' }}
+          # On a PR, load the built image into the local docker daemon so the SBOM and
+          # vulnerability scan have something to read. (Single-platform build, so `load`
+          # is valid.)
+          load: ${{ github.event_name == 'pull_request' }}
           tags: |
-            ${{ steps.tag.outputs.tag }}
+            ${{ steps.tag.outputs.scan }}
+            ${{ github.event_name != 'pull_request' && steps.tag.outputs.tag || '' }}
             ${{ github.ref == 'refs/heads/main' && format('{0}:latest', steps.tag.outputs.image) || '' }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -88,14 +102,14 @@ jobs:
       - name: Generate SBOM with Syft
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
         with:
-          image: ${{ steps.tag.outputs.tag }}
+          image: ${{ steps.tag.outputs.scan }}
           format: cyclonedx-json
           output-file: sbom/sbom-docker-cyclonedx.json
 
       - name: Generate SPDX SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
         with:
-          image: ${{ steps.tag.outputs.tag }}
+          image: ${{ steps.tag.outputs.scan }}
           format: spdx-json
           output-file: sbom/sbom-docker-spdx.json
 
@@ -104,7 +118,7 @@ jobs:
         id: scan
         uses: anchore/scan-action@869c549e657a088dc0441b08ce4fc0ecdac2bb65
         with:
-          image: ${{ steps.tag.outputs.tag }}
+          image: ${{ steps.tag.outputs.scan }}
           fail-build: false
           severity-cutoff: medium
 
@@ -123,7 +137,7 @@ jobs:
       - name: Generate human-readable scan report
         if: success() || failure()
         run: |
-          ${{ steps.grype-cli.outputs.cmd }} ${{ steps.tag.outputs.tag }} --scope all-layers -o table > sbom/vulnerability-report.txt || true
+          ${{ steps.grype-cli.outputs.cmd }} ${{ steps.tag.outputs.scan }} --scope all-layers -o table > sbom/vulnerability-report.txt || true
           echo "=== Vulnerability Report ==="
           cat sbom/vulnerability-report.txt
 

@@ -77,7 +77,7 @@ pip install audio-separator>=0.44.0 --no-deps
 # Installing with --no-deps bypasses the bad pin.
 # dora-search is demucs's logging lib (imported as `import dora`).
 pip install demucs --no-deps
-pip install einops julius lameenc openunmix pyyaml tqdm dora-search
+pip install einops julius lameenc openunmix pyyaml tqdm dora-search sphn
 
 # Step 4 (optional): diffq, for QUANTIZED demucs checkpoints only.
 # --only-binary=:all: makes pip fail rather than fall back to the sdist, so this
