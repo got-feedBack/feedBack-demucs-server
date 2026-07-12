@@ -19,6 +19,7 @@ LABEL org.opencontainers.image.description="AI source separation, lyrics alignme
 # image.source is what links the published package to this repo on GHCR - it must
 # point at the repo that actually builds it, or the package is orphaned.
 LABEL org.opencontainers.image.source="https://github.com/got-feedBack/feedBack-demucs-server"
+LABEL org.opencontainers.image.licenses="AGPL-3.0-only"
 
 # Prevent Python from writing .pyc files & buffer stdout
 ENV PYTHONDONTWRITEBYTECODE=1 \

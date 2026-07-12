@@ -382,3 +382,8 @@ WebSocket for real-time separation progress updates.
 ### Configure in Slopsmith
 
 Set the Demucs Server URL to `http://<your-server-ip>:7865` in Slopsmith settings.
+
+## License
+
+**AGPL-3.0-only** — the same license as the [feedBack](https://github.com/got-feedBack/feedBack)
+app this server exists to serve, and as the plugins that call it. See [LICENSE](LICENSE).
