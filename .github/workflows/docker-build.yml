@@ -97,8 +97,17 @@ jobs:
           fail-build: false
           severity-cutoff: medium
 
+      # Fork PRs get a READ-ONLY GITHUB_TOKEN, so `security-events: write` is not
+      # actually granted and this step 403s — failing the whole check even though the
+      # build and the scan both passed. That would block exactly the contributions we
+      # want (this repo already has open PRs from forks). Skip the upload there; the
+      # scan still runs, and the human-readable report is still uploaded as an artifact
+      # below, so a fork PR loses the Security-tab entry but nothing else.
       - name: Upload SARIF report to GitHub
-        if: steps.scan.outputs.sarif != ''
+        if: >-
+          steps.scan.outputs.sarif != '' &&
+          (github.event_name != 'pull_request' ||
+           github.event.pull_request.head.repo.full_name == github.repository)
         uses: github/codeql-action/upload-sarif@458d36d7d4f47d0dd16ca424c1d3cda0060f1360
         with:
           sarif_file: ${{ steps.scan.outputs.sarif }}
