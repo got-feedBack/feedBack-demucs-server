@@ -70,7 +70,7 @@ pip install -r requirements.txt
 # Step 2: Install audio-separator SEPARATELY (diffq source-build workaround)
 # Its deps pull in `diffq`, which has no wheel for Python 3.11+ and would try to
 # compile from source. Its real deps are already in requirements.txt.
-pip install audio-separator>=0.44.0 --no-deps
+pip install "audio-separator>=0.44.0" --no-deps
 
 # Step 3: Install demucs SEPARATELY (torchaudio version conflict workaround)
 # demucs requires torchaudio<2.1, which conflicts with whisperx.

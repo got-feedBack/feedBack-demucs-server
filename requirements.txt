@@ -60,7 +60,9 @@ onnx-weekly
 onnx2torch-py313>=1.6
 onnxruntime>=1.17
 pydub>=0.25
-requests>=2
+# Floor, not a bare >=2: old 2.x releases carry HIGH-severity advisories
+# (credential leak on cross-host redirect, verify=False session reuse).
+requests>=2.32.4
 resampy>=0.4
 rotary-embedding-torch>=0.6.1,<0.7.0
 samplerate==0.1.0

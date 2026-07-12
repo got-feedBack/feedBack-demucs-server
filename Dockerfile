@@ -1,14 +1,14 @@
 # ============================================================
-# Slopsmith Demucs Server — Docker Image
+# feedBack Demucs Server — Docker Image
 # ============================================================
 # Build:
-#   docker build -t slopsmith-demucs-server .
+#   docker build -t feedback-demucs-server .
 #
 # Run (CPU):
-#   docker run -p 7865:7865 slopsmith-demucs-server
+#   docker run -p 7865:7865 feedback-demucs-server
 #
 # Run (GPU — requires nvidia-container-toolkit):
-#   docker run --gpus all -p 7865:7865 slopsmith-demucs-server
+#   docker run --gpus all -p 7865:7865 feedback-demucs-server
 # ============================================================
 
 # ---- Base: Python slim ----
@@ -66,7 +66,8 @@ RUN pip install --no-cache-dir \
         openunmix \
         pyyaml \
         tqdm \
-        dora-search
+        dora-search \
+        sphn
 
 # ---- diffq: BINARY-ONLY, and optional ----
 # Needed only to load QUANTIZED demucs checkpoints. `demucs` guards its import and
