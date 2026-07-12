@@ -55,8 +55,9 @@ def _load_enqueue_job(jobs, max_concurrent=2):
         "_run_demucs": lambda *a: None,
         "_is_roformer_model": lambda m: "roformer" in m,
     }
+    ns["_update_job"] = lambda job_id, **kw: jobs.get(job_id, {}).update(kw)
     exec(compile(ast.unparse(mod), "<test>", "exec"), ns)
-    return ns["_enqueue_job"], started
+    return ns["_enqueue_job"], started, ns
 
 
 JOB_ID = "deadbeef-bs-roformer-sw"
@@ -86,7 +87,7 @@ def _in_flight(stem_list):
 def test_superset_request_is_not_served_from_a_smaller_completed_job():
     """THE bug: a 6-stem request answered with the cached 4, instantly, with no error."""
     jobs = _completed(FOUR)
-    enqueue, started = _load_enqueue_job(jobs)
+    enqueue, started, _ns = _load_enqueue_job(jobs)
     result = enqueue(JOB_ID, "/tmp/a.ogg", SIX_NAMES, "bs_roformer_sw")
 
     assert result.get("cached") is not True, (
@@ -98,7 +99,7 @@ def test_superset_request_is_not_served_from_a_smaller_completed_job():
 
 def test_exact_match_is_served_from_cache():
     jobs = _completed(SIX)
-    enqueue, started = _load_enqueue_job(jobs)
+    enqueue, started, _ns = _load_enqueue_job(jobs)
     result = enqueue(JOB_ID, "/tmp/a.ogg", SIX_NAMES, "bs_roformer_sw")
     assert result["cached"] is True
     assert set(result["stems"]) == set(SIX)
@@ -109,7 +110,7 @@ def test_subset_request_is_served_from_a_larger_completed_job():
     """Fewer stems than were computed is a legitimate hit — and returns only what was asked
     for, not everything we happen to have lying around."""
     jobs = _completed(SIX)
-    enqueue, started = _load_enqueue_job(jobs)
+    enqueue, started, _ns = _load_enqueue_job(jobs)
     result = enqueue(JOB_ID, "/tmp/a.ogg", ["vocals", "drums"], "bs_roformer_sw")
     assert result["cached"] is True
     assert set(result["stems"]) == {"vocals", "drums"}
@@ -118,7 +119,7 @@ def test_subset_request_is_served_from_a_larger_completed_job():
 
 def test_case_and_whitespace_do_not_defeat_the_coverage_check():
     jobs = _completed(SIX)
-    enqueue, _ = _load_enqueue_job(jobs)
+    enqueue, _, _ns = _load_enqueue_job(jobs)
     assert enqueue(JOB_ID, "/tmp/a.ogg", [" Vocals ", "DRUMS"], "bs_roformer_sw")["cached"]
 
 
@@ -130,7 +131,7 @@ def test_a_job_from_before_this_fix_still_serves_its_stems():
         "stems": dict(SIX), "error": None, "model": "bs_roformer_sw",
         "created_at": time.time(),
     }})
-    enqueue, started = _load_enqueue_job(jobs)
+    enqueue, started, _ns = _load_enqueue_job(jobs)
     result = enqueue(JOB_ID, "/tmp/a.ogg", ["vocals", "guitar"], "bs_roformer_sw")
     assert result["cached"] is True
     assert not started
@@ -140,7 +141,7 @@ def test_in_flight_job_with_a_smaller_set_is_not_silently_joined():
     """Riding along on a running 4-stem job completes without guitar/piano — the same silent
     loss, merely delayed."""
     jobs = _in_flight(["drums", "bass", "vocals", "other"])
-    enqueue, _ = _load_enqueue_job(jobs)
+    enqueue, _, _ns = _load_enqueue_job(jobs)
     result = enqueue(JOB_ID, "/tmp/a.ogg", SIX_NAMES, "bs_roformer_sw")
     assert "error" in result
     assert result.get("status") != "processing"
@@ -148,7 +149,7 @@ def test_in_flight_job_with_a_smaller_set_is_not_silently_joined():
 
 def test_in_flight_job_that_covers_us_is_joined():
     jobs = _in_flight(SIX_NAMES)
-    enqueue, started = _load_enqueue_job(jobs)
+    enqueue, started, _ns = _load_enqueue_job(jobs)
     result = enqueue(JOB_ID, "/tmp/a.ogg", ["vocals", "guitar"], "bs_roformer_sw")
     assert result["status"] == "processing"
     assert not started, "must attach to the running job, not start a second separation"
@@ -166,7 +167,7 @@ def test_pre_fix_job_with_original_cased_keys_returns_urls_not_an_empty_dict():
         "stems": {"Vocals": "/download/x/Vocals.flac", "Drums": "/download/x/Drums.flac"},
         "error": None, "model": "bs_roformer_sw", "created_at": time.time(),
     }})
-    enqueue, started = _load_enqueue_job(jobs)
+    enqueue, started, _ns = _load_enqueue_job(jobs)
     result = enqueue(JOB_ID, "/tmp/a.ogg", ["vocals", "drums"], "bs_roformer_sw")
 
     assert result["cached"] is True
@@ -177,7 +178,7 @@ def test_pre_fix_job_with_original_cased_keys_returns_urls_not_an_empty_dict():
 
 def test_caller_casing_is_echoed_back_with_normalized_urls():
     jobs = _completed(SIX)
-    enqueue, _ = _load_enqueue_job(jobs)
+    enqueue, _, _ns = _load_enqueue_job(jobs)
     result = enqueue(JOB_ID, "/tmp/a.ogg", ["Vocals", "GUITAR"], "bs_roformer_sw")
     assert result["cached"] is True
     assert set(result["stems"]) == {"Vocals", "GUITAR"}
@@ -258,7 +259,7 @@ def test_known_missing_stems_are_not_recomputed_forever():
         "missing": ["guitar"],
         "error": None, "model": "htdemucs", "created_at": time.time(),
     }})
-    enqueue, started = _load_enqueue_job(jobs)
+    enqueue, started, _ns = _load_enqueue_job(jobs)
     result = enqueue(JOB_ID, "/tmp/a.ogg",
                      ["drums", "bass", "vocals", "other", "guitar"], "htdemucs")
 
@@ -272,7 +273,7 @@ def test_a_genuinely_incomplete_job_is_still_recomputed():
     """The distinction that makes the above safe: a narrower PREVIOUS RUN (not an impossible
     stem) must still re-separate, or we'd reintroduce the silent loss."""
     jobs = _completed(FOUR)                 # bs_roformer_sw CAN do guitar; it just wasn't asked
-    enqueue, started = _load_enqueue_job(jobs)
+    enqueue, started, _ns = _load_enqueue_job(jobs)
     result = enqueue(JOB_ID, "/tmp/a.ogg", SIX_NAMES, "bs_roformer_sw")
     assert started, "guitar/piano are producible here — go and produce them"
     assert result.get("cached") is not True
@@ -286,7 +287,7 @@ def test_second_superset_request_attaches_instead_of_duplicating_the_separation(
     overwrite each other's result. The replacement `processing` entry is now installed under
     the same lock as the decision, so the second caller sees it in flight."""
     jobs = _completed(FOUR)
-    enqueue, started = _load_enqueue_job(jobs)
+    enqueue, started, _ns = _load_enqueue_job(jobs)
 
     first = enqueue(JOB_ID, "/tmp/a.ogg", SIX_NAMES, "bs_roformer_sw")
     second = enqueue(JOB_ID, "/tmp/a.ogg", SIX_NAMES, "bs_roformer_sw")
@@ -306,7 +307,7 @@ def test_in_flight_legacy_job_with_no_stem_list_is_not_joined_blindly():
         "job_id": JOB_ID, "status": "processing", "progress": 40, "stems": {},
         "error": None, "model": "bs_roformer_sw", "created_at": time.time(),
     }})
-    enqueue, started = _load_enqueue_job(jobs)
+    enqueue, started, _ns = _load_enqueue_job(jobs)
     result = enqueue(JOB_ID, "/tmp/a.ogg", SIX_NAMES, "bs_roformer_sw")
 
     assert "error" in result
@@ -322,7 +323,7 @@ def test_conflicts_are_409_not_503():
     problem: backing off cannot fix it, and a client that sees 503 has no way to tell the two
     apart. Capacity exhaustion keeps 503; conflicts get 409."""
     jobs = _in_flight(["drums", "bass", "vocals", "other"])
-    enqueue, _ = _load_enqueue_job(jobs)
+    enqueue, _, _ns = _load_enqueue_job(jobs)
     result = enqueue(JOB_ID, "/tmp/a.ogg", SIX_NAMES, "bs_roformer_sw")
     assert result["status_code"] == 409
 
@@ -330,17 +331,55 @@ def test_conflicts_are_409_not_503():
         "job_id": JOB_ID, "status": "processing", "progress": 10, "stems": {},
         "error": None, "model": "bs_roformer_sw", "created_at": time.time(),
     }})   # legacy job: unknown stem set
-    enqueue, _ = _load_enqueue_job(jobs)
+    enqueue, _, _ns = _load_enqueue_job(jobs)
     assert enqueue(JOB_ID, "/tmp/a.ogg", SIX_NAMES, "bs_roformer_sw")["status_code"] == 409
 
 
 def test_capacity_exhaustion_is_still_503():
     """The one case 503 is actually for. It must NOT be reclassified — a client SHOULD back
     off and retry here, which is exactly what 503 tells it to do."""
-    enqueue, _ = _load_enqueue_job(collections.OrderedDict(), max_concurrent=0)
+    enqueue, _, _ns = _load_enqueue_job(collections.OrderedDict(), max_concurrent=0)
     result = enqueue(JOB_ID, "/tmp/a.ogg", SIX_NAMES, "bs_roformer_sw")
     assert "error" in result
     assert result.get("status_code") is None, "absent => the route's 503 default applies"
+
+
+# ── capacity must be RESERVED, not merely observed ───────────────────────────
+
+def test_concurrent_enqueues_cannot_exceed_max_concurrent():
+    """The gate checked active_count without incrementing it, and the workers incremented
+    only once they started — so two near-simultaneous enqueues for DIFFERENT job_ids both
+    passed the check and briefly ran MAX_CONCURRENT+1 separations. On a small GPU that is not
+    a queue, it's an OOM kill mid-job."""
+    enqueue, started, ns = _load_enqueue_job(collections.OrderedDict(), max_concurrent=1)
+
+    first = enqueue("job-a", "/tmp/a.ogg", ["vocals"], "bs_roformer_sw")
+    second = enqueue("job-b", "/tmp/b.ogg", ["vocals"], "bs_roformer_sw")
+
+    assert first["status"] == "processing"
+    assert "error" in second, "the second must be refused: the slot is already reserved"
+    assert len(started) == 1, "MAX_CONCURRENT=1 must mean ONE running separation"
+    assert ns["active_count"] == 1
+
+
+def test_the_reserved_slot_is_released_if_the_worker_cannot_start():
+    """The slot is released by the runner's `finally`. If the thread never starts, that never
+    runs — so a failed start would leak a slot permanently and wedge the server one
+    separation earlier, for good."""
+    enqueue, started, ns = _load_enqueue_job(collections.OrderedDict(), max_concurrent=2)
+
+    class _Boom:
+        def __init__(self, **kw):
+            pass
+
+        def start(self):
+            raise RuntimeError("can't start thread")
+
+    ns["threading"] = type("T", (), {"Thread": _Boom})
+
+    result = enqueue(JOB_ID, "/tmp/a.ogg", ["vocals"], "bs_roformer_sw")
+    assert "error" in result
+    assert ns["active_count"] == 0, "the reservation must not leak"
 
 
 if __name__ == "__main__":

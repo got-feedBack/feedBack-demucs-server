@@ -1794,9 +1794,19 @@ def _enqueue_job(job_id, audio_path, stem_list, model):
         # separation for the same job_id - duplicating several GPU-minutes and racing to
         # overwrite each other's result.
         with active_lock:
+            # RESERVE, don't just look. Checking without incrementing let two near-
+            # simultaneous enqueues (for different job_ids) both pass the gate before either
+            # worker got as far as incrementing — briefly running MAX_CONCURRENT+1
+            # separations and over-subscribing the GPU, which on a small card means an OOM
+            # kill mid-job rather than a queue.
+            #
+            # The runners no longer increment; they only decrement in their `finally`. The
+            # slot is held from here until the worker finishes, so the count can never lag
+            # behind reality.
             if active_count >= MAX_CONCURRENT:
                 return {"error": "Server busy — max concurrent separations reached",
                         "job_id": job_id}
+            active_count += 1
 
         jobs[job_id] = {
             "job_id": job_id,
@@ -1819,11 +1829,20 @@ def _enqueue_job(job_id, audio_path, stem_list, model):
     # Outside the lock: starting a thread can block, and the job is already visible as
     # `processing`, so any concurrent caller now attaches instead of duplicating it.
     runner = _run_roformer if _is_roformer_model(model) else _run_demucs
-    threading.Thread(
-        target=runner,
-        args=(job_id, audio_path, stem_list, model),
-        daemon=True,
-    ).start()
+    try:
+        threading.Thread(
+            target=runner,
+            args=(job_id, audio_path, stem_list, model),
+            daemon=True,
+        ).start()
+    except Exception as e:
+        # The slot is RESERVED, and the runner's `finally` — the only thing that releases it
+        # — will now never run. Release it here, or a failed thread start leaks a slot
+        # permanently and the server wedges one separation earlier, for good.
+        with active_lock:
+            active_count -= 1
+        _update_job(job_id, status="failed", error=f"could not start the worker: {e}")
+        return {"error": f"Could not start the separation: {e}", "job_id": job_id}
 
     return {"job_id": job_id, "status": "processing"}
 
@@ -1832,8 +1851,9 @@ def _run_demucs(job_id, audio_path, stem_list, model):
     """Run demucs separation in a background thread."""
     global active_count
 
-    with active_lock:
-        active_count += 1
+    # NB: the slot was RESERVED by _enqueue_job before this thread was started (see the note
+    # there). Incrementing here as well would double-count and let the server run under its
+    # own limit. We only release it, in the `finally` below.
 
     tmp_out = tempfile.mkdtemp(prefix="demucs_out_")
     try:
@@ -1935,8 +1955,9 @@ def _run_roformer(job_id, audio_path, stem_list, model):
     """
     global active_count
 
-    with active_lock:
-        active_count += 1
+    # NB: the slot was RESERVED by _enqueue_job before this thread was started (see the note
+    # there). Incrementing here as well would double-count and let the server run under its
+    # own limit. We only release it, in the `finally` below.
 
     tmp_out = tempfile.mkdtemp(prefix="roformer_out_")
     proc = None
