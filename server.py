@@ -1697,91 +1697,123 @@ def _initialize_cache_order():
 
 
 def _enqueue_job(job_id, audio_path, stem_list, model):
-    """Create a job and start processing in background."""
+    """Create a job and start processing in background.
+
+    job_id is (audio_hash, model) and deliberately does NOT include the stem set, so this
+    has to decide whether an existing job for the same audio+model actually answers THIS
+    request. Getting that wrong in either direction is expensive:
+
+      * too permissive -> return a job that lacks the caller's stems (silent data loss);
+      * too strict     -> re-run a ~2 min GPU separation that cannot produce a different
+                          answer (an unbounded recompute loop for a stem the model does not
+                          have).
+
+    Everything up to and including installing the replacement job happens under jobs_lock,
+    so two concurrent superset requests cannot both decide to re-separate and start
+    duplicate work.
+    """
     global active_count
 
     wanted = {s.strip().lower() for s in stem_list}
 
     with jobs_lock:
-        # If a job for this audio+model already exists, reuse it — but ONLY if it actually
-        # covers what this caller asked for.
-        #
-        # It used to return the existing job's stems regardless. Since job_id is
-        # (audio, model) and NOT the stem set, a 4-stem separation followed by a 6-stem
-        # request on the same audio silently returned the 4 — in 0 ms, looking like a fast
-        # success. The caller asked for guitar and piano and simply didn't get them, with no
-        # error and nothing to indicate the answer was stale rather than authoritative.
         existing = jobs.get(job_id)
-        if existing and existing["status"] in ("processing", "complete"):
-            if existing["status"] == "complete":
-                # Normalize the KEYS before both the coverage check and the lookup.
-                #
-                # A job from before this fix stores `stems` keyed by the ORIGINAL caller's
-                # casing (`{"Vocals": ...}`). Testing coverage case-insensitively while
-                # looking values up by the lowercased name would pass the check and then
-                # find nothing — returning `cached: True` with an empty stems dict. A
-                # confident, instant, empty answer is worse than the bug this PR fixes.
-                all_urls = {k.strip().lower(): v
-                            for k, v in (existing.get("stems_all")
-                                         or existing.get("stems") or {}).items()}
-                if wanted <= set(all_urls):
-                    return {
-                        "job_id": job_id,
-                        # Keys echo what the CALLER asked for; values come from the
-                        # normalized map.
-                        "stems": {s: all_urls[s.strip().lower()] for s in stem_list},
-                        "cached": True,
-                    }
-                # Not covered: the previous run produced a smaller set (an older, narrower
-                # request, or a job from before this fix). Fall through and re-separate, so
-                # the caller gets what it actually asked for.
-            else:
-                # In flight. If its stem set covers ours we can ride along; if not, the
-                # result would be short, so don't attach to it — but we also can't run two
-                # jobs under one id, so tell the caller plainly instead of handing back a
-                # job that will complete without their stems.
-                in_flight = {s.strip().lower() for s in (existing.get("stem_list") or [])}
-                if not in_flight or wanted <= in_flight:
-                    return {"job_id": job_id, "status": "processing"}
+
+        if existing and existing.get("status") == "complete":
+            # Normalize keys before BOTH the coverage test and the lookup. A job from before
+            # this fix stores `stems` keyed by the caller's original casing, so checking
+            # case-insensitively and then looking up by the lowercased name would pass the
+            # check and match nothing - `cached: true` with an empty stems dict.
+            all_urls = {k.strip().lower(): v
+                        for k, v in (existing.get("stems_all")
+                                     or existing.get("stems") or {}).items()}
+            have = set(all_urls)
+            # Stems this MODEL could not produce (htdemucs has no `guitar`). Re-running will
+            # not conjure them: neither runner passes stem_list to the subprocess, so the
+            # separation is byte-for-byte the same work with the same outputs.
+            known_missing = {s.strip().lower() for s in (existing.get("missing") or [])}
+
+            if wanted <= have:
                 return {
-                    "error": "A separation for this audio is already running with a smaller "
-                             "stem set. Retry once it finishes and the extra stems will be "
-                             "computed.",
                     "job_id": job_id,
+                    # Keys echo the caller's spelling; values come from the normalized map.
+                    "stems": {s: all_urls[s.strip().lower()] for s in stem_list},
+                    "cached": True,
                 }
 
-    with active_lock:
-        if active_count >= MAX_CONCURRENT:
-            return {"error": "Server busy — max concurrent separations reached", "job_id": job_id}
+            if wanted <= (have | known_missing):
+                # Everything we lack is known-impossible for this model. Serve what exists
+                # and SAY what doesn't, rather than re-separating on every request forever.
+                return {
+                    "job_id": job_id,
+                    "stems": {s: all_urls[s.strip().lower()]
+                              for s in stem_list if s.strip().lower() in all_urls},
+                    "missing": [s for s in stem_list
+                                if s.strip().lower() in known_missing],
+                    "cached": True,
+                }
 
-    job = {
-        "job_id": job_id,
-        "status": "processing",
-        "progress": 0,
-        "stems": {},
-        # What THIS run was asked for, and (once complete) everything the model actually
-        # produced. job_id is (audio, model) and does not include the stem set, so a later
-        # request for a different set has to be able to tell whether this job covers it.
-        "stem_list": list(stem_list),
-        "stems_all": {},
-        "missing": [],
-        "error": None,
-        "model": model,
-        "created_at": time.time(),
-    }
-    with jobs_lock:
-        jobs[job_id] = job
-        # Trim old jobs
+            # Genuinely incomplete: an older, narrower run, or a pre-fix job that recorded no
+            # `missing`. Fall through and re-separate so the caller gets what it asked for.
+
+        elif existing and existing.get("status") == "processing":
+            in_flight_raw = existing.get("stem_list")
+            if in_flight_raw is None:
+                # A job started by an older server version: we cannot know what it will
+                # produce. Attaching would risk completing without the caller's stems - the
+                # exact silent loss this change exists to stop - so refuse rather than guess.
+                return {
+                    "error": "A separation for this audio is already running, but its stem "
+                             "set is unknown (it was started by an earlier server version). "
+                             "Retry once it finishes.",
+                    "job_id": job_id,
+                }
+            in_flight = {s.strip().lower() for s in in_flight_raw}
+            if wanted <= in_flight:
+                return {"job_id": job_id, "status": "processing"}
+            return {
+                "error": "A separation for this audio is already running with a smaller stem "
+                         "set. Retry once it finishes and the extra stems will be computed.",
+                "job_id": job_id,
+            }
+
+        # ── Nothing usable exists: take the job. ─────────────────────────────────────────
+        # Still under jobs_lock. The capacity check and the `processing` entry must be
+        # installed here, not after releasing it: two concurrent superset requests would
+        # otherwise both find the stale completed job, both fall through, and both start a
+        # separation for the same job_id - duplicating several GPU-minutes and racing to
+        # overwrite each other's result.
+        with active_lock:
+            if active_count >= MAX_CONCURRENT:
+                return {"error": "Server busy — max concurrent separations reached",
+                        "job_id": job_id}
+
+        jobs[job_id] = {
+            "job_id": job_id,
+            "status": "processing",
+            "progress": 0,
+            "stems": {},
+            # What THIS run was asked for, and (once complete) everything the model actually
+            # produced plus anything it could not. A later request for a different stem set
+            # needs all three to decide whether this job answers it.
+            "stem_list": list(stem_list),
+            "stems_all": {},
+            "missing": [],
+            "error": None,
+            "model": model,
+            "created_at": time.time(),
+        }
         while len(jobs) > 200:
             jobs.popitem(last=False)
 
+    # Outside the lock: starting a thread can block, and the job is already visible as
+    # `processing`, so any concurrent caller now attaches instead of duplicating it.
     runner = _run_roformer if _is_roformer_model(model) else _run_demucs
-    thread = threading.Thread(
+    threading.Thread(
         target=runner,
         args=(job_id, audio_path, stem_list, model),
         daemon=True,
-    )
-    thread.start()
+    ).start()
 
     return {"job_id": job_id, "status": "processing"}
 

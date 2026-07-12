@@ -238,5 +238,81 @@ def test_on_disk_cache_misses_when_a_requested_stem_is_absent(tmp_path):
     assert check(JOB_ID, ["vocals", "guitar"], "bs_roformer_sw") is None
 
 
+# ── impossible stems must not re-separate forever ────────────────────────────
+
+def test_known_missing_stems_are_not_recomputed_forever():
+    """The recompute loop this PR nearly shipped.
+
+    Ask htdemucs (4-stem) for `guitar`: the job completes with guitar in `missing`. The next
+    identical request finds `wanted` not covered, falls through, and separates again — ~2 min
+    of GPU for output that CANNOT contain guitar, because neither runner passes stem_list to
+    the subprocess: the work is byte-for-byte identical every time.
+
+    Every request pays full inference, forever. A caller polling for a stem the model can't
+    produce is an unbounded GPU spend, and the fix for the ORIGINAL bug is what created it.
+    """
+    jobs = collections.OrderedDict({JOB_ID: {
+        "job_id": JOB_ID, "status": "complete", "progress": 100,
+        "stems": dict(FOUR), "stems_all": dict(FOUR),
+        "stem_list": ["drums", "bass", "vocals", "other", "guitar"],
+        "missing": ["guitar"],
+        "error": None, "model": "htdemucs", "created_at": time.time(),
+    }})
+    enqueue, started = _load_enqueue_job(jobs)
+    result = enqueue(JOB_ID, "/tmp/a.ogg",
+                     ["drums", "bass", "vocals", "other", "guitar"], "htdemucs")
+
+    assert not started, "must NOT re-separate: the model cannot produce guitar, ever"
+    assert result["cached"] is True
+    assert set(result["stems"]) == set(FOUR), "serve what does exist"
+    assert result["missing"] == ["guitar"], "and say plainly what does not"
+
+
+def test_a_genuinely_incomplete_job_is_still_recomputed():
+    """The distinction that makes the above safe: a narrower PREVIOUS RUN (not an impossible
+    stem) must still re-separate, or we'd reintroduce the silent loss."""
+    jobs = _completed(FOUR)                 # bs_roformer_sw CAN do guitar; it just wasn't asked
+    enqueue, started = _load_enqueue_job(jobs)
+    result = enqueue(JOB_ID, "/tmp/a.ogg", SIX_NAMES, "bs_roformer_sw")
+    assert started, "guitar/piano are producible here — go and produce them"
+    assert result.get("cached") is not True
+
+
+# ── concurrency ──────────────────────────────────────────────────────────────
+
+def test_second_superset_request_attaches_instead_of_duplicating_the_separation():
+    """Two concurrent superset requests both saw the stale completed job, both fell through,
+    and both started a separation for the same job_id — duplicating GPU-minutes and racing to
+    overwrite each other's result. The replacement `processing` entry is now installed under
+    the same lock as the decision, so the second caller sees it in flight."""
+    jobs = _completed(FOUR)
+    enqueue, started = _load_enqueue_job(jobs)
+
+    first = enqueue(JOB_ID, "/tmp/a.ogg", SIX_NAMES, "bs_roformer_sw")
+    second = enqueue(JOB_ID, "/tmp/a.ogg", SIX_NAMES, "bs_roformer_sw")
+
+    assert first["status"] == "processing"
+    assert second["status"] == "processing"
+    assert len(started) == 1, "the same separation must not be started twice"
+
+
+# ── legacy in-flight jobs (deploy/upgrade window) ────────────────────────────
+
+def test_in_flight_legacy_job_with_no_stem_list_is_not_joined_blindly():
+    """A job started by an older server has no `stem_list`. Treating "unknown" as "covers
+    everything" would attach to it and complete without the caller's stems — reintroducing
+    the exact silent loss, during a deploy window, where it is hardest to notice."""
+    jobs = collections.OrderedDict({JOB_ID: {
+        "job_id": JOB_ID, "status": "processing", "progress": 40, "stems": {},
+        "error": None, "model": "bs_roformer_sw", "created_at": time.time(),
+    }})
+    enqueue, started = _load_enqueue_job(jobs)
+    result = enqueue(JOB_ID, "/tmp/a.ogg", SIX_NAMES, "bs_roformer_sw")
+
+    assert "error" in result
+    assert result.get("status") != "processing"
+    assert not started
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
