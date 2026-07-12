@@ -15,7 +15,7 @@ SERVER_PY = Path(__file__).parent.parent / "server.py"
 
 def _extract_function(func_name: str):
     """Extract a function from server.py source code using AST."""
-    source = SERVER_PY.read_text()
+    source = SERVER_PY.read_text(encoding="utf-8")
     tree = ast.parse(source)
     for node in ast.iter_child_nodes(tree):
         if isinstance(node, ast.FunctionDef) and node.name == func_name:
@@ -100,10 +100,17 @@ def _parse_requirement_pin(line: str):
 
 
 def _read_requirements():
-    """Read requirements.txt and return dict of package -> min_version."""
+    """Read requirements.txt and return dict of package -> min_version.
+
+    encoding="utf-8" explicitly. Without it, open() uses the platform default — UTF-8 on
+    Linux (so CI is green) and **cp1252 on Windows**, where any non-ASCII character in the
+    file (an em-dash in a comment is enough) raises UnicodeDecodeError. These tests were
+    passing in CI while being broken for every Windows contributor, which is the worst way
+    for a test to fail: invisibly, and only for other people.
+    """
     req_path = Path(__file__).parent.parent / "requirements.txt"
     pins = {}
-    with open(req_path) as f:
+    with open(req_path, encoding="utf-8") as f:
         for line in f:
             parsed = _parse_requirement_pin(line)
             if parsed:
@@ -158,7 +165,7 @@ class TestServiceFile:
         """After= must reference both network.target AND network-online.target
         to prevent the service from starting before the network stack is
         fully ready (Wants= alone doesn't enforce ordering)."""
-        content = self.SERVICE_PATH.read_text()
+        content = self.SERVICE_PATH.read_text(encoding="utf-8")
         assert "After=network.target network-online.target" in content, (
             "After= should be 'network.target network-online.target', "
             "not just 'network.target'"
@@ -176,7 +183,7 @@ class TestStaleJobsCleanup:
         """Extract _cache_cleanup_loop from server.py and verify that
         shutil.rmtree is immediately followed by jobs.pop with the
         same entry name, wrapped in the jobs_lock."""
-        source = SERVER_PY.read_text()
+        source = SERVER_PY.read_text(encoding="utf-8")
         tree = ast.parse(source)
         
         # Find _cache_cleanup_loop function
@@ -220,7 +227,7 @@ class TestFirstSweepImmediate:
         """Extract _cache_cleanup_loop and verify time.sleep is at the
         END of the while body, not the beginning. This ensures the
         first sweep runs immediately on startup."""
-        source = SERVER_PY.read_text()
+        source = SERVER_PY.read_text(encoding="utf-8")
         tree = ast.parse(source)
         
         func_node = None
