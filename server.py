@@ -1613,10 +1613,23 @@ def _check_cache(job_id, stem_list, model):
 
     stems_found = {}
     for stem_name in stem_list:
-        for ext in (".mp3", ".wav", ".flac"):
-            p = cache_path / f"{stem_name}{ext}"
-            if p.exists():
-                stems_found[stem_name] = f"/download/{job_id}/{stem_name}{ext}"
+        # Probe the LOWERCASE filename first (what the workers now write), then the caller's
+        # own casing (what pre-fix cache entries were written with). Probing only the
+        # caller's spelling would miss a cache entry that exists — a mixed-case `stems=`
+        # request would silently re-separate, and after a restart the in-memory jobs table
+        # is empty, so this is the ONLY path that can find it.
+        lower = stem_name.strip().lower()
+        for candidate in (lower, stem_name):
+            hit = None
+            for ext in (".mp3", ".wav", ".flac"):
+                p = cache_path / f"{candidate}{ext}"
+                if p.exists():
+                    # The key echoes what the caller asked for; the URL points at the file
+                    # that actually exists on disk.
+                    hit = f"/download/{job_id}/{candidate}{ext}"
+                    break
+            if hit:
+                stems_found[stem_name] = hit
                 break
 
     if len(stems_found) == len(stem_list):
@@ -1701,14 +1714,22 @@ def _enqueue_job(job_id, audio_path, stem_list, model):
         existing = jobs.get(job_id)
         if existing and existing["status"] in ("processing", "complete"):
             if existing["status"] == "complete":
-                have = {k.strip().lower()
-                        for k in (existing.get("stems_all") or existing.get("stems") or {})}
-                if wanted <= have:
-                    all_urls = existing.get("stems_all") or existing.get("stems") or {}
+                # Normalize the KEYS before both the coverage check and the lookup.
+                #
+                # A job from before this fix stores `stems` keyed by the ORIGINAL caller's
+                # casing (`{"Vocals": ...}`). Testing coverage case-insensitively while
+                # looking values up by the lowercased name would pass the check and then
+                # find nothing — returning `cached: True` with an empty stems dict. A
+                # confident, instant, empty answer is worse than the bug this PR fixes.
+                all_urls = {k.strip().lower(): v
+                            for k, v in (existing.get("stems_all")
+                                         or existing.get("stems") or {}).items()}
+                if wanted <= set(all_urls):
                     return {
                         "job_id": job_id,
-                        "stems": {s: all_urls[s.strip().lower()]
-                                  for s in stem_list if s.strip().lower() in all_urls},
+                        # Keys echo what the CALLER asked for; values come from the
+                        # normalized map.
+                        "stems": {s: all_urls[s.strip().lower()] for s in stem_list},
                         "cached": True,
                     }
                 # Not covered: the previous run produced a smaller set (an older, narrower

@@ -154,5 +154,89 @@ def test_in_flight_job_that_covers_us_is_joined():
     assert not started, "must attach to the running job, not start a second separation"
 
 
+def test_pre_fix_job_with_original_cased_keys_returns_urls_not_an_empty_dict():
+    """Coverage was checked case-insensitively while the lookup used the lowercased name.
+
+    A job from before this fix stores `stems` keyed by the caller's ORIGINAL casing, so the
+    check passed and the lookup then found nothing — `cached: True` with an EMPTY stems
+    dict. A confident, instant, empty answer is worse than the bug this PR set out to fix.
+    """
+    jobs = collections.OrderedDict({JOB_ID: {
+        "job_id": JOB_ID, "status": "complete", "progress": 100,
+        "stems": {"Vocals": "/download/x/Vocals.flac", "Drums": "/download/x/Drums.flac"},
+        "error": None, "model": "bs_roformer_sw", "created_at": time.time(),
+    }})
+    enqueue, started = _load_enqueue_job(jobs)
+    result = enqueue(JOB_ID, "/tmp/a.ogg", ["vocals", "drums"], "bs_roformer_sw")
+
+    assert result["cached"] is True
+    assert set(result["stems"]) == {"vocals", "drums"}, "keys echo what the caller asked for"
+    assert all(result["stems"].values()), "and every one must carry a real URL, not None"
+    assert not started
+
+
+def test_caller_casing_is_echoed_back_with_normalized_urls():
+    jobs = _completed(SIX)
+    enqueue, _ = _load_enqueue_job(jobs)
+    result = enqueue(JOB_ID, "/tmp/a.ogg", ["Vocals", "GUITAR"], "bs_roformer_sw")
+    assert result["cached"] is True
+    assert set(result["stems"]) == {"Vocals", "GUITAR"}
+    assert result["stems"]["GUITAR"] == SIX["guitar"]
+
+
+def _load_check_cache(cache_dir):
+    """Extract _check_cache, pointing it at a temp cache dir."""
+    tree = ast.parse(SERVER_PY.read_text(encoding="utf-8"))
+    node = next(n for n in ast.iter_child_nodes(tree)
+                if isinstance(n, ast.FunctionDef) and n.name == "_check_cache")
+    mod = ast.Module(body=[node], type_ignores=[])
+    ast.copy_location(mod, node)
+    ns = {
+        "_cache_entry_path": lambda job_id: Path(cache_dir),
+        "_remember_cache_entry": lambda job_id: None,
+    }
+    exec(compile(ast.unparse(mod), "<test>", "exec"), ns)
+    return ns["_check_cache"]
+
+
+def test_on_disk_cache_is_found_for_a_mixed_case_request(tmp_path):
+    """The workers now write LOWERCASE filenames. Probing only the caller's own spelling
+    would miss a cache entry that exists — and after a restart the in-memory jobs table is
+    empty, so this is the ONLY path that can find it. A mixed-case request would silently
+    re-separate something already on disk."""
+    for name in ("vocals", "drums"):
+        (tmp_path / f"{name}.flac").write_bytes(b"x")
+
+    check = _load_check_cache(tmp_path)
+    found = check(JOB_ID, ["Vocals", "DRUMS"], "bs_roformer_sw")
+
+    assert found is not None, "a mixed-case request must still hit the lowercase cache files"
+    assert set(found) == {"Vocals", "DRUMS"}, "keys echo the caller's spelling"
+    assert found["Vocals"].endswith("vocals.flac"), "URL points at the file that exists"
+
+
+def test_on_disk_cache_still_finds_pre_fix_original_cased_files(tmp_path):
+    """Entries written before this change carry the caller's casing. They must still be found.
+
+    Deliberately case-INSENSITIVE about the URL. Windows' filesystem is case-insensitive, so
+    the lowercase probe matches `Vocals.flac` and we emit `vocals.flac`; Linux's is
+    case-sensitive, so the lowercase probe misses and we emit `Vocals.flac`. Both resolve to
+    the same file on their own platform. Asserting the exact spelling would encode the
+    developer's OS into the test — which is precisely the class of bug that had these tests
+    passing in CI while broken on Windows.
+    """
+    (tmp_path / "Vocals.flac").write_bytes(b"x")
+    check = _load_check_cache(tmp_path)
+    found = check(JOB_ID, ["Vocals"], "bs_roformer_sw")
+    assert found is not None
+    assert found["Vocals"].lower().endswith("vocals.flac")
+
+
+def test_on_disk_cache_misses_when_a_requested_stem_is_absent(tmp_path):
+    (tmp_path / "vocals.flac").write_bytes(b"x")
+    check = _load_check_cache(tmp_path)
+    assert check(JOB_ID, ["vocals", "guitar"], "bs_roformer_sw") is None
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
