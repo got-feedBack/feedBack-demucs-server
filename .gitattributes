@@ -1,0 +1,11 @@
+# Normalize line endings on commit. Without this, a contributor on Windows (or a tool
+# that writes files with the platform default) can commit CRLF — which for a Dockerfile
+# or a shell script is not cosmetic: YAMLlint rejects CRLF workflows, and `docker-entrypoint.sh`
+# with CRLF fails at runtime with `$'\r': command not found`.
+* text=auto eol=lf
+
+# Never touch binaries.
+*.png binary
+*.jpg binary
+*.ico binary
+*.whl binary

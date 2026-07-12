@@ -1,9 +1,9 @@
 # ============================================================
-# Docker Build, SBOM & Security Scan — Slopsmith Demucs Server
+# Docker Build, SBOM & Security Scan — feedBack Demucs Server
 # ============================================================
 # Builds Docker image, generates SBOM, scans for vulnerabilities:
 #   - On every pull request (build + scan only, no push)
-#   - On every push to main branch (build + scan + push to GHCR)
+#   - On every push to main branch (build + scan, then publish to GHCR)
 #   - On demand via workflow_dispatch
 #
 # The pull_request trigger is deliberate: this workflow was silently failing on
@@ -21,18 +21,23 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Required for GHCR push
+# Least privilege by DEFAULT. `permissions` is workflow-wide, so granting
+# packages: write here would hand every PR run a GHCR-write token it has no use for.
+# Only the publish job (main / dispatch, never a PR) asks for it.
 permissions:
   contents: read
-  packages: write
-  security-events: write
 
 env:
   REGISTRY: ghcr.io
 
 jobs:
+  # ── Build + scan. Runs for EVERY event, including PRs. Never pushes, and never
+  #    holds a token that could. ─────────────────────────────────────────────────
   build-and-scan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # upload-sarif
 
     steps:
       - name: Checkout repository
@@ -43,58 +48,28 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
 
-      # GHCR requires lowercase repository names
-      - name: Lowercase repo for GHCR tag
+      - name: Local image tag
         id: tag
-        run: |
-          REPO_LC="${REPO_OWNER,,}/${REPO_NAME,,}"
-          echo "image=ghcr.io/${REPO_LC}" >> "$GITHUB_OUTPUT"
-          echo "tag=ghcr.io/${REPO_LC}:${SHA}" >> "$GITHUB_OUTPUT"
-          # What the SBOM/scan steps look at. On a PR nothing is pushed, so they must
-          # read the image from the local docker daemon (see `load:` below) instead of
-          # pulling it back from a registry it was never sent to.
-          if [ "${EVENT}" = "pull_request" ]; then
-            echo "scan=${REPO_NAME,,}:pr-${{ github.event.number }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "scan=ghcr.io/${REPO_LC}:${SHA}" >> "$GITHUB_OUTPUT"
-          fi
+        run: echo "scan=${REPO_NAME,,}:${SHA}" >> "$GITHUB_OUTPUT"
         env:
-          REPO_OWNER: ${{ github.repository_owner }}
           REPO_NAME: ${{ github.event.repository.name }}
           SHA: ${{ github.sha }}
-          EVENT: ${{ github.event_name }}
 
-      - name: Log in to GitHub Container Registry
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push Docker image
-        id: build
+      # Build into the local docker daemon (`load`), never a registry. The scan steps
+      # then read that local image — on a PR there is nothing pushed to pull back.
+      - name: Build Docker image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
           context: .
-          # Build on PRs to gate them, but only publish from main. A PR from a fork
-          # has a read-only GITHUB_TOKEN and could not push anyway.
-          push: ${{ github.event_name != 'pull_request' }}
-          # On a PR, load the built image into the local docker daemon so the SBOM and
-          # vulnerability scan have something to read. (Single-platform build, so `load`
-          # is valid.)
-          load: ${{ github.event_name == 'pull_request' }}
-          tags: |
-            ${{ steps.tag.outputs.scan }}
-            ${{ github.event_name != 'pull_request' && steps.tag.outputs.tag || '' }}
-            ${{ github.ref == 'refs/heads/main' && format('{0}:latest', steps.tag.outputs.image) || '' }}
+          push: false
+          load: true
+          tags: ${{ steps.tag.outputs.scan }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # ── Create output directory for SBOM + scan results ──
       - name: Create output directory
         run: mkdir -p sbom/
 
@@ -129,7 +104,6 @@ jobs:
           sarif_file: ${{ steps.scan.outputs.sarif }}
           category: grype
 
-      # ── Install Grype CLI for human-readable report ──────────────────
       - name: Install Grype CLI
         id: grype-cli
         uses: anchore/scan-action/download-grype@869c549e657a088dc0441b08ce4fc0ecdac2bb65
@@ -141,7 +115,6 @@ jobs:
           echo "=== Vulnerability Report ==="
           cat sbom/vulnerability-report.txt
 
-      # ── Upload artifacts ────────────────────────────────────────────────
       - name: Upload SBOM and scan results
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: success() || failure()
@@ -149,3 +122,54 @@ jobs:
           name: sbom-and-scan-results
           path: sbom/
           retention-days: 30
+
+  # ── Publish. main / manual only — a PR can never reach this job, so a PR run's
+  #    token never carries packages: write. Reuses the build cache, so this is a
+  #    layer-cache replay rather than a second full build. ────────────────────────
+  publish:
+    if: github.event_name != 'pull_request'
+    needs: build-and-scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+
+      # GHCR requires lowercase repository names
+      - name: Lowercase repo for GHCR tag
+        id: tag
+        run: |
+          REPO_LC="${REPO_OWNER,,}/${REPO_NAME,,}"
+          echo "image=ghcr.io/${REPO_LC}" >> "$GITHUB_OUTPUT"
+          echo "tag=ghcr.io/${REPO_LC}:${SHA}" >> "$GITHUB_OUTPUT"
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          SHA: ${{ github.sha }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push Docker image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.tag.outputs.tag }}
+            ${{ github.ref == 'refs/heads/main' && format('{0}:latest', steps.tag.outputs.image) || '' }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
