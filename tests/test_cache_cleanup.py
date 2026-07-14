@@ -290,18 +290,39 @@ class TestSweeperOnlyDeletesStemCaches:
     A blacklist is the wrong shape here: it must enumerate everything that has to survive, so
     whatever it forgets gets destroyed — including any model dir a future version adds. The
     sweeper now deletes only names that LOOK like stem-cache entries.
+
+    Everything below is read out of server.py with AST. Parsing the source (rather than
+    grepping it, or exec'ing a line of it) means these tests keep testing the CODE and not the
+    text: they don't pass because a name appears in a comment, and they don't break when a
+    line moves.
     """
 
-    SERVER_SRC = SERVER_PY.read_text(encoding="utf-8")
+    TREE = ast.parse(SERVER_PY.read_text(encoding="utf-8"))
+
+    def _literal(self, name):
+        """The value assigned to a module-level constant."""
+        for node in ast.iter_child_nodes(self.TREE):
+            if isinstance(node, ast.Assign):
+                for tgt in node.targets:
+                    if isinstance(tgt, ast.Name) and tgt.id == name:
+                        return node.value
+        raise AssertionError(f"{name} not found in server.py")
 
     def _entry_re(self):
-        ns = {"re": re}
-        for line in self.SERVER_SRC.splitlines():
-            if line.startswith("_CACHE_ENTRY_RE"):
-                exec(line, ns)
-                return ns["_CACHE_ENTRY_RE"]
-        raise AssertionError("_CACHE_ENTRY_RE not found in server.py")
+        # _CACHE_ENTRY_RE = re.compile(r"...") -> compile the literal pattern itself.
+        call = self._literal("_CACHE_ENTRY_RE")
+        assert isinstance(call, ast.Call), "_CACHE_ENTRY_RE should be a re.compile(...) call"
+        pattern = ast.literal_eval(call.args[0])
+        return re.compile(pattern)
 
+    def _preserved(self):
+        # frozenset({...}) -> the real set, not a substring of the file.
+        node = self._literal("_PRESERVED_CACHE_DIRS")
+        if isinstance(node, ast.Call):          # frozenset({...})
+            node = node.args[0]
+        return set(ast.literal_eval(node))
+
+    # ── what may be deleted ───────────────────────────────────────────────────
     def test_a_real_stem_cache_entry_is_deletable(self):
         # _job_id_for() -> f"{sha256[:16]}-{model-slug}"
         assert self._entry_re().fullmatch("7a819518228bca22-bs-roformer-sw")
@@ -312,8 +333,8 @@ class TestSweeperOnlyDeletesStemCaches:
         assert not self._entry_re().fullmatch("_roformer-models")
 
     def test_the_other_model_dirs_are_not_deletable(self):
-        for name in ("torch", "huggingface", "locale"):
-            assert not self._entry_re().fullmatch(name)
+        for name in ("torch", "huggingface", "locale", "hub"):
+            assert not self._entry_re().fullmatch(name), name
 
     def test_an_unknown_future_model_dir_is_not_deletable(self):
         """The point of a whitelist: a model dir nobody has added yet must survive too. Under
@@ -321,14 +342,24 @@ class TestSweeperOnlyDeletesStemCaches:
         for name in ("_mdx-models", "whisper-models", "some-new-cache", "openvino"):
             assert not self._entry_re().fullmatch(name), name
 
+    def test_the_pattern_is_no_looser_than_what_we_emit(self):
+        """Matching more loosely than _job_id_for() emits only widens the set of directories
+        we are willing to delete — the opposite of the point."""
+        for name in ("DEADBEEFDEADBEEF-model",      # hash is lowercase hex
+                     "deadbeefdeadbeef-Model_X.1",  # slug is lowercased + sanitized
+                     "some.model.cache"):
+            assert not self._entry_re().fullmatch(name), name
+
+    # ── the safeguards are real, not textual ──────────────────────────────────
     def test_roformer_dir_is_also_on_the_preserve_list(self):
-        # Belt as well as braces: even if the pattern check were bypassed, the name is listed.
-        assert '"_roformer-models"' in self.SERVER_SRC
+        # Membership in the actual set — not "the string appears somewhere in the file",
+        # which would still pass if the name were only left behind in a comment.
+        assert "_roformer-models" in self._preserved()
 
     def test_the_sweeper_actually_consults_the_pattern(self):
-        # A constant nobody calls fixes nothing.
-        src = self.SERVER_SRC
-        start = src.index("def _cache_cleanup_loop")
-        body = src[start:start + 2000]
-        assert "_CACHE_ENTRY_RE" in body, "the cleanup loop must check the pattern"
-
+        """A constant nobody reads fixes nothing. Assert the cleanup loop REFERENCES it."""
+        loop = next(n for n in ast.walk(self.TREE)
+                    if isinstance(n, ast.FunctionDef) and n.name == "_cache_cleanup_loop")
+        names = {n.id for n in ast.walk(loop) if isinstance(n, ast.Name)}
+        assert "_CACHE_ENTRY_RE" in names, "_cache_cleanup_loop must check the pattern"
+        assert "_PRESERVED_CACHE_DIRS" in names

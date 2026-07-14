@@ -103,7 +103,11 @@ _PRESERVED_CACHE_DIRS = frozenset({"torch", "huggingface", "locale", "_roformer-
 # we added, a model dir some future version adds, a stray file a user dropped in — is left
 # alone. Deleting only what we recognize is the only version of this that stays correct as
 # the cache dir grows new neighbours.
-_CACHE_ENTRY_RE = re.compile(r"^[0-9a-f]{16}-[A-Za-z0-9._-]+$")
+# Exactly what _job_id_for() emits: sha256[:16] (lowercase hex) + "-" + a slug that is
+# re.sub(r"[^A-Za-z0-9]+", "-", model).strip("-").lower() — so lowercase, digits and
+# hyphens, nothing else. Matching more loosely than we emit only widens the set of
+# directories we are willing to delete, which is the opposite of the point.
+_CACHE_ENTRY_RE = re.compile(r"^[0-9a-f]{16}-[a-z0-9-]+$")
 
 
 def _parse_ttl(ttl_str: str) -> int | None:
