@@ -26,6 +26,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import traceback
 import threading
 import time
 import uuid
@@ -83,6 +84,78 @@ CACHE_DIR = Path(os.environ.get(
     Path.home() / ".cache" / "slopsmith-demucs",
 ))
 MAX_CONCURRENT = 2
+
+# A Whisper segment must be LONGER than this to be aligned — the comparison is a strict `>`, so
+# a segment of exactly this duration is dropped too. wav2vec2 tends to return empty alignments
+# for sub-frame windows, so passing them in degrades the output instead of adding to it, and
+# Whisper emits them constantly on breaths, noise and stem bleed. Shared by /align and
+# /transcribe — the two used to carry the same 0.2 independently, which is how they drift.
+_MIN_SEGMENT_SECONDS = 0.2
+
+
+# Any absolute path: POSIX (/app/cache/...) or Windows (C:\Users\...). The lookbehind keeps
+# URLs intact — the "//" in "https://host/x" is not a filesystem path, and mangling it would
+# destroy an error that is mostly about which host we failed to reach.
+_ABS_PATH_RE = re.compile(r"(?<![\w:/\\])(?:[A-Za-z]:[\\/]|/)[\w.\-/\\]{2,}")
+
+
+def _normalized_language(language: str) -> str:
+    """The caller's language hint, normalized — or "" for no hint at all.
+
+    Normalize BEFORE deciding whether a hint was given. `if language:` is true for `" "`, which
+    then strips to `""` and fails the pattern, so a blank hint came back as a 400 "invalid
+    language code" — rejecting a request that asked for nothing in particular. Whitespace is not
+    a language; it is the absence of one.
+
+    Raises ValueError for a genuinely malformed code (the caller's mistake -> 400). Subtags like
+    `en-US` are rejected rather than truncated to `en`: silently reinterpreting a request is how
+    you end up aligning Portuguese audio with an English model and wondering why it's bad.
+    """
+    lang = (language or "").strip().lower()
+    if not lang:
+        return ""
+    if not re.fullmatch(r"[a-z]{2,8}", lang):
+        raise ValueError(f"Invalid language code: {lang!r}")
+    return lang
+
+
+def _client_safe_error(e: Exception, where: str) -> str:
+    """Log an unexpected exception in full, and return a version fit to hand a caller.
+
+    The tension is real and worth being explicit about. Returning bare ``str(e)`` leaks host
+    filesystem layout — cache paths, home directory, container internals — to whoever can reach
+    the endpoint, and this server is routinely exposed on a LAN. But returning a flat "internal
+    error" throws away the diagnosis, and the caller has no access to these logs: the whole
+    reason the client bug that necessitated /transcribe stayed hidden for so long is that the
+    message explaining it never reached anybody who could act on it.
+
+    So: the full traceback goes to the server's stdout, where the operator can see it, and the
+    caller gets the exception type and message with absolute paths scrubbed. "CUDA out of memory"
+    survives — it's the answer, and it isn't a secret. "/app/cache/models--foo/snapshots/…" does
+    not.
+
+    The traceback is printed to stdout EXPLICITLY: traceback.print_exc() defaults to stderr,
+    which would split one error across two streams — the trace on stderr, the summary line below
+    on stdout — and under `docker logs` those interleave by arrival, so the two halves of the
+    same failure end up apart, next to unrelated lines. Everything else here logs with print(),
+    so this follows it.
+    """
+    traceback.print_exc(file=sys.stdout)
+    msg = str(e)
+    # Named roots first, so the common cases read as themselves rather than as <path>.
+    for secret, placeholder in (
+        (str(CACHE_DIR), "<cache>"),
+        (str(Path.home()), "<home>"),
+    ):
+        if secret and secret not in ("/", "\\"):
+            msg = msg.replace(secret, placeholder)
+    # Then anything else that looks like an absolute path.
+    msg = _ABS_PATH_RE.sub("<path>", msg)
+    msg = msg.strip() or e.__class__.__name__
+    if len(msg) > 500:
+        msg = msg[:500] + "…"
+    print(f"[{where}] ERROR: {e.__class__.__name__}: {e}")
+    return f"{e.__class__.__name__}: {msg}"
 CACHE_TTL = os.environ.get("CACHE_TTL", "24h")
 # Directories under CACHE_DIR that hold model weights (never auto-deleted).
 #
@@ -854,10 +927,8 @@ async def align_lyrics(
             # speech (no silence misalignment) and short (no OOM).
             asr_model = _get_whisperx_model()
             transcribe_kwargs: dict = {"batch_size": 16}
-            if language:
-                normalized_lang = language.strip().lower()
-                if not re.fullmatch(r'[a-z]{2,8}', normalized_lang):
-                    raise ValueError(f"Invalid language code: {normalized_lang!r}")
+            normalized_lang = _normalized_language(language)
+            if normalized_lang:
                 transcribe_kwargs["language"] = normalized_lang
             transcribed = asr_model.transcribe(audio, **transcribe_kwargs)
             # Caller's explicit hint takes precedence — Whisper's auto-
@@ -867,9 +938,12 @@ async def align_lyrics(
             # Use the already-normalised value (strip+lower) when the
             # caller supplied a language hint, so detected_lang is always
             # clean before passing to _get_whisperx_aligner().
+            # Branch on the NORMALIZED value, not the raw one. `language=" "` is truthy, so the
+            # raw check took the "caller supplied a hint" path and set detected_lang to "" —
+            # which then asks _get_whisperx_aligner() for a model in the language named "".
+            # Whitespace means no hint; fall through to detection.
             detected_lang = (
-                normalized_lang if language
-                else (transcribed.get("language") or "en").lower()
+                normalized_lang or (transcribed.get("language") or "en").lower()
             )
             raw_speech_segments = transcribed.get("segments", []) or []
 
@@ -877,7 +951,7 @@ async def align_lyrics(
             # to produce empty alignments for sub-frame windows.
             speech_segments = [
                 s for s in raw_speech_segments
-                if float(s.get("end", 0.0)) - float(s.get("start", 0.0)) > 0.2
+                if float(s.get("end", 0.0)) - float(s.get("start", 0.0)) > _MIN_SEGMENT_SECONDS
             ]
 
             # Distribute user-text words across speech segments
@@ -1210,6 +1284,127 @@ async def align_lyrics(
     import asyncio
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, _do_align)
+
+    if "error" in result:
+        status = result.pop("_http_status", 500)
+        return JSONResponse(result, status)
+    return result
+
+
+@app.post("/transcribe")
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    language: str = Form(""),
+):
+    """Transcribe sung audio to word-level timed lyrics. No lyrics supplied.
+
+    This is the endpoint feedBack's "transcribe" path always meant to call. It was calling
+    ``/align`` — forced alignment — whose ``text`` field is REQUIRED, so FastAPI rejected the
+    request with a 422 before the handler ever ran, every single time. Remote transcription had
+    therefore never worked at all (got-feedBack/feedBack-plugin-stem-splitter#17). The two
+    operations answer genuinely different questions and both are worth having:
+
+        /align      "here are the lyrics — when is each word sung?"   (needs text)
+        /transcribe "what are the lyrics, and when is each sung?"     (needs nothing but audio)
+
+    Whisper hears the words; wav2vec2 then force-aligns Whisper's own transcript to get word
+    timestamps far tighter than Whisper's segment boundaries. That second pass is why this isn't
+    just ``asr.transcribe()``: raw Whisper segments are line-ish and drift, and a karaoke chart
+    built from them sits visibly late.
+
+    Returns native ``whisperx.align()`` output — ``{"segments": [{start, end, text, words:
+    [{word, start, end, score}]}], "language": "en"}`` — which is exactly what the client's
+    mapper already consumes, so nothing downstream has to learn a new shape.
+    """
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename or "audio.ogg").suffix)
+    # _do_transcribe() unlinks the temp file in its finally — but it only runs if we get that
+    # far. A client that disconnects mid-upload, or a full disk, raises HERE, and the handler
+    # exits leaving the file behind. One orphan is nothing; one per failed upload, on a server
+    # that runs for months, is a disk slowly filling with nothing.
+    import asyncio
+    try:
+        # Stream it, and write OFF the event loop.
+        #
+        # `await file.read()` pulls the whole stem into RAM before a byte reaches disk — a
+        # 4-minute lossless vocals stem is ~40 MB, and nothing stops a caller uploading 2 GB to
+        # see what happens. Chunks cap that.
+        #
+        # But `tmp.write()` is blocking disk I/O, and this handler runs ON the loop: a slow disk
+        # (a NAS, a spinning volume, an overloaded container) would stall every other request in
+        # the process while one upload dribbles in — including /health, which is what tells a
+        # client the server is alive. The heavy transcription is already offloaded; the write
+        # has to be too, or the careful part is undone by the careless one.
+        while chunk := await file.read(1024 * 1024):
+            await asyncio.to_thread(tmp.write, chunk)
+        await asyncio.to_thread(tmp.close)
+    except Exception:
+        tmp.close()
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        raise
+
+    def _do_transcribe():
+        try:
+            audio = whisperx.load_audio(tmp.name)
+            if float(len(audio)) / 16000.0 <= 0:
+                return {"error": "audio is empty", "_http_status": 400}
+
+            asr_model = _get_whisperx_model()
+            transcribe_kwargs: dict = {"batch_size": 16}
+            normalized_lang = _normalized_language(language)
+            if normalized_lang:
+                transcribe_kwargs["language"] = normalized_lang
+
+            transcribed = asr_model.transcribe(audio, **transcribe_kwargs)
+            # The caller's hint wins: Whisper's auto-detection mis-classifies on short clips,
+            # instrumental intros and non-English vocals, and a wrong guess here loads the wrong
+            # wav2vec2 aligner — which fails obscurely rather than loudly.
+            detected_lang = (
+                normalized_lang if normalized_lang
+                else (transcribed.get("language") or "en").lower()
+            )
+            # Drop sub-frame segments before aligning, exactly as /align does (and for the same
+            # reason it documents): wav2vec2 tends to return empty alignments for windows this
+            # short, so feeding them in produces degraded output instead of no output. Whisper
+            # emits these on breaths, noise and stem bleed.
+            segments = [
+                s for s in (transcribed.get("segments") or [])
+                if float(s.get("end", 0.0)) - float(s.get("start", 0.0)) > _MIN_SEGMENT_SECONDS
+            ]
+
+            # An instrumental track is not an error. A stem with no singing in it transcribes to
+            # nothing (or to nothing but sub-frame noise), and that is the correct answer —
+            # returning 400 would make the caller treat a successful "this song has no vocals"
+            # as a failed request.
+            if not segments:
+                return {"segments": [], "language": detected_lang}
+
+            aligner_model, aligner_meta = _get_whisperx_aligner(detected_lang)
+            aligned = whisperx.align(
+                segments,
+                aligner_model,
+                aligner_meta,
+                audio,
+                _whisperx_device(),
+                return_char_alignments=False,
+            )
+            return {"segments": aligned.get("segments", []) or [], "language": detected_lang}
+        except ValueError as e:
+            # Client input problems (bad language code) — 400, so a caller can tell its own
+            # mistake from a server fault.
+            return {"error": str(e), "_http_status": 400}
+        except Exception as e:
+            return {"error": _client_safe_error(e, "transcribe")}
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, _do_transcribe)
 
     if "error" in result:
         status = result.pop("_http_status", 500)

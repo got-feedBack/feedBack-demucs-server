@@ -20,6 +20,16 @@ Splits audio into individual stems using [Demucs](https://github.com/facebookres
 - Per-stem caching, keyed by audio **and model** (avoids re-processing; same song under two models caches separately)
 - WebSocket progress updates
 
+### Lyrics Transcription (`POST /transcribe`)
+
+Transcribe sung audio to **word-level timed lyrics** — no lyrics supplied. Whisper hears
+the words; wav2vec2 then force-aligns Whisper's own transcript, giving timestamps far tighter
+than Whisper's segment boundaries (a chart built from raw Whisper segments sits visibly late).
+
+- Answers the question `/align` can't: *what are the lyrics, and when is each word sung?*
+- Automatic language detection (or manual hint)
+- An instrumental track transcribes to `{"segments": []}` — that's an answer, not an error
+
 ### Lyrics Alignment (`POST /align`)
 
 Forced alignment of plain text lyrics against an audio file using
@@ -360,6 +370,25 @@ Separate audio into stems.
 | `stems` | Query | Comma-separated stem names (default: `drums,bass,vocals,other`) |
 | `model` | Query | Override model (optional) |
 
+### `POST /transcribe`
+
+Transcribe sung audio to word-level timed lyrics using WhisperX (faster-whisper ASR + wav2vec2 forced alignment of its own transcript). Use this when you do **not** have the lyrics; use `/align` when you do.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `file` | Form (file) | Audio file (vocals stem) |
+| `language` | Form | ISO 639-1/2 language code hint, e.g. `en`, `es`, `pt` (optional, auto-detected). Case-insensitive — the value is trimmed and lowercased before validation, so `EN` and `en` both work. Must then be 2–8 letters; subtags like `en-US` are rejected (400) because the hyphen is not a letter. |
+
+Returns native WhisperX alignment output:
+
+```json
+{"segments": [{"start": 12.3, "end": 15.1, "text": "hello world",
+               "words": [{"word": "hello", "start": 12.3, "end": 12.8, "score": 0.94}]}],
+ "language": "en"}
+```
+
+A stem with no singing in it returns `{"segments": [], "language": "en"}` with a 200 — an instrumental is a valid answer, not a failed request.
+
 ### `POST /align`
 
 Forced-align lyrics against audio using WhisperX (faster-whisper transcription + wav2vec2 forced aligner).
@@ -368,7 +397,7 @@ Forced-align lyrics against audio using WhisperX (faster-whisper transcription +
 |-----------|------|-------------|
 | `file` | Form (file) | Audio file (vocals stem) |
 | `text` | Form | Plain text lyrics |
-| `language` | Form | ISO 639-1/2 language code hint, e.g. `en`, `es`, `pt` (optional, auto-detected). Must be 2–8 lowercase letters; subtags like `en-US` are not supported. |
+| `language` | Form | ISO 639-1/2 language code hint, e.g. `en`, `es`, `pt` (optional, auto-detected). Case-insensitive — the value is trimmed and lowercased before validation, so `EN` and `en` both work. Must then be 2–8 letters; subtags like `en-US` are rejected (400) because the hyphen is not a letter. |
 | `granularity` | Form | `line` (default), `word`, `syllable`, or `phoneme` |
 
 Granularity behaviour:
