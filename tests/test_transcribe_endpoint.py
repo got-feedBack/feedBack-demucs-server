@@ -115,6 +115,26 @@ r = client.post("/transcribe", files=AUDIO, data={"language": "EN"})
 if r.status_code != 200:
     fail("an uppercase language code must be accepted (it is lowercased), got %s" % r.status_code)
 
+# 2c. A blank hint is NO hint, not a bad one. `if language:` is true for " ", which then strips
+#     to "" and fails the pattern — so a request asking for nothing in particular came back as
+#     400 "invalid language code". Whitespace is not a language; it is the absence of one.
+for blank in ("", " ", "   "):
+    _install([{"start": 0.0, "end": 1.0, "text": "hello"}], language="en")
+    r = client.post("/transcribe", files=AUDIO, data={"language": blank})
+    if r.status_code != 200:
+        fail("a blank language hint must mean 'no hint', got %s for %r" % (r.status_code, blank))
+
+# ...and the normalizer is shared, so /align cannot drift back into the old behaviour.
+if server._normalized_language("  ") != "":
+    fail("whitespace must normalize to no-hint")
+if server._normalized_language(" ES ") != "es":
+    fail("a hint must be trimmed and lowercased")
+try:
+    server._normalized_language("en-US")
+    fail("a subtag must be rejected, not silently truncated to 'en'")
+except ValueError:
+    pass
+
 # 3. An instrumental is an ANSWER, not an error: no vocals -> no words, 200.
 _install([])
 r = client.post("/transcribe", files=AUDIO)

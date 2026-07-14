@@ -99,6 +99,26 @@ _MIN_SEGMENT_SECONDS = 0.2
 _ABS_PATH_RE = re.compile(r"(?<![\w:/\\])(?:[A-Za-z]:[\\/]|/)[\w.\-/\\]{2,}")
 
 
+def _normalized_language(language: str) -> str:
+    """The caller's language hint, normalized — or "" for no hint at all.
+
+    Normalize BEFORE deciding whether a hint was given. `if language:` is true for `" "`, which
+    then strips to `""` and fails the pattern, so a blank hint came back as a 400 "invalid
+    language code" — rejecting a request that asked for nothing in particular. Whitespace is not
+    a language; it is the absence of one.
+
+    Raises ValueError for a genuinely malformed code (the caller's mistake -> 400). Subtags like
+    `en-US` are rejected rather than truncated to `en`: silently reinterpreting a request is how
+    you end up aligning Portuguese audio with an English model and wondering why it's bad.
+    """
+    lang = (language or "").strip().lower()
+    if not lang:
+        return ""
+    if not re.fullmatch(r"[a-z]{2,8}", lang):
+        raise ValueError(f"Invalid language code: {lang!r}")
+    return lang
+
+
 def _client_safe_error(e: Exception, where: str) -> str:
     """Log an unexpected exception in full, and return a version fit to hand a caller.
 
@@ -901,10 +921,8 @@ async def align_lyrics(
             # speech (no silence misalignment) and short (no OOM).
             asr_model = _get_whisperx_model()
             transcribe_kwargs: dict = {"batch_size": 16}
-            if language:
-                normalized_lang = language.strip().lower()
-                if not re.fullmatch(r'[a-z]{2,8}', normalized_lang):
-                    raise ValueError(f"Invalid language code: {normalized_lang!r}")
+            normalized_lang = _normalized_language(language)
+            if normalized_lang:
                 transcribe_kwargs["language"] = normalized_lang
             transcribed = asr_model.transcribe(audio, **transcribe_kwargs)
             # Caller's explicit hint takes precedence — Whisper's auto-
@@ -1318,11 +1336,8 @@ async def transcribe_audio(
 
             asr_model = _get_whisperx_model()
             transcribe_kwargs: dict = {"batch_size": 16}
-            normalized_lang = ""
-            if language:
-                normalized_lang = language.strip().lower()
-                if not re.fullmatch(r'[a-z]{2,8}', normalized_lang):
-                    raise ValueError(f"Invalid language code: {normalized_lang!r}")
+            normalized_lang = _normalized_language(language)
+            if normalized_lang:
                 transcribe_kwargs["language"] = normalized_lang
 
             transcribed = asr_model.transcribe(audio, **transcribe_kwargs)
