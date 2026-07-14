@@ -2215,9 +2215,19 @@ def _run_warmup() -> None:
 
 def _cache_cleanup_loop() -> None:
     """Background daemon thread: periodically delete expired stem cache dirs.
-    
-    Walks CACHE_DIR, skips preserved directories (torch, huggingface, locale),
-    and deletes any stem cache directory whose mtime exceeds CACHE_TTL.
+
+    Walks CACHE_DIR and deletes a directory only if it BOTH:
+
+      * is not in _PRESERVED_CACHE_DIRS (torch, huggingface, locale, _roformer-models), and
+      * matches _CACHE_ENTRY_RE — i.e. it looks like something _job_id_for() produced.
+
+    The second condition is the load-bearing one. This used to be a preserve-list alone, which
+    is a blacklist: it has to enumerate everything that must survive, so whatever it forgets
+    gets destroyed. It forgot `_roformer-models`, and duly deleted the 700 MB BS-Roformer-SW
+    checkpoint every 24 hours — users re-downloaded it on the next start, forever, with no
+    error and no clue why. Deleting only what we RECOGNIZE is the only version of this that
+    stays correct as the cache dir gains new neighbours.
+
     Runs every 10 minutes.
     """
     if CACHE_TTL_SECONDS is None:

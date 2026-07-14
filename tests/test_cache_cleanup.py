@@ -311,7 +311,13 @@ class TestSweeperOnlyDeletesStemCaches:
     def _entry_re(self):
         # _CACHE_ENTRY_RE = re.compile(r"...") -> compile the literal pattern itself.
         call = self._literal("_CACHE_ENTRY_RE")
+        # Assert it is specifically a re.compile(...) call, not merely "a call". Otherwise a
+        # refactor to some other callable with the same first-argument shape would slip
+        # through, and this helper would compile whatever that call's first argument happened
+        # to be — testing a pattern the sweeper does not use.
         assert isinstance(call, ast.Call), "_CACHE_ENTRY_RE should be a re.compile(...) call"
+        assert ast.unparse(call.func) == "re.compile", (
+            f"_CACHE_ENTRY_RE should be built by re.compile, got {ast.unparse(call.func)}")
         pattern = ast.literal_eval(call.args[0])
         return re.compile(pattern)
 
