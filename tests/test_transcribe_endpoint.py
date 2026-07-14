@@ -103,6 +103,13 @@ r = client.post("/transcribe", files=AUDIO, data={"language": "en-US!!"})
 if r.status_code != 400:
     fail("a malformed language code must be a 400, got %s" % r.status_code)
 
+# 2b. The hint is case-insensitive: the server lowercases before validating, and the README now
+#     says so. "EN" must not be a 400.
+_install([{"start": 0.0, "end": 1.0, "text": "hello"}], language="en")
+r = client.post("/transcribe", files=AUDIO, data={"language": "EN"})
+if r.status_code != 200:
+    fail("an uppercase language code must be accepted (it is lowercased), got %s" % r.status_code)
+
 # 3. An instrumental is an ANSWER, not an error: no vocals -> no words, 200.
 _install([])
 r = client.post("/transcribe", files=AUDIO)
@@ -110,6 +117,33 @@ if r.status_code != 200:
     fail("an instrumental must not be an error, got %s" % r.status_code)
 if r.json().get("segments") != []:
     fail("an instrumental must return an empty segment list")
+
+# 3b. Sub-frame segments are dropped BEFORE alignment, as /align does — wav2vec2 returns empty
+#     alignments for windows that short, so they degrade the output rather than adding to it.
+#     A stem of nothing but breaths and bleed is therefore an instrumental, not a bad align.
+_captured = {}
+def _capture_align(segments, model, meta, audio, device, return_char_alignments=False):
+    _captured["segments"] = segments
+    return {"segments": [{"start": 1.0, "end": 2.0, "text": "x",
+                          "words": [{"word": "x", "start": 1.0, "end": 2.0, "score": 0.9}]}]}
+_whisperx.align = _capture_align
+
+_install([
+    {"start": 0.00, "end": 0.10, "text": "hm"},      # a breath: below the floor
+    {"start": 1.00, "end": 2.50, "text": "hello"},   # real singing
+    {"start": 3.00, "end": 3.05, "text": "s"},       # stem bleed
+])
+r = client.post("/transcribe", files=AUDIO)
+if r.status_code != 200:
+    fail("filtered transcribe failed: %s" % r.status_code)
+kept = [s["text"] for s in _captured.get("segments", [])]
+if kept != ["hello"]:
+    fail("sub-frame segments must be dropped before alignment, aligner saw %r" % (kept,))
+
+_install([{"start": 0.0, "end": 0.1, "text": "hm"}])   # nothing BUT sub-frame noise
+r = client.post("/transcribe", files=AUDIO)
+if r.status_code != 200 or r.json().get("segments") != []:
+    fail("a stem of only sub-frame noise is an instrumental, got %s %s" % (r.status_code, r.text[:200]))
 
 # 4. /align still REQUIRES text — that difference is the whole reason /transcribe exists, and
 #    if /align ever stopped 422ing here, the original bug would have become invisible instead
@@ -134,6 +168,8 @@ def test_transcribe_accepts_audio_with_no_lyrics():
         return
     if "HARNESS_FAIL:" in result.stdout:
         pytest.fail(combined)
-    if "ModuleNotFoundError" in combined:
-        pytest.skip("a dependency we don't stub is missing:\n" + combined)
+    # No skip-on-ModuleNotFoundError. Every module this harness needs and does NOT stub —
+    # fastapi above all — is a hard requirement of server.py, so a missing one means the server
+    # cannot import, and skipping there would turn "the server is broken" into a green run. The
+    # heavy ML deps are stubbed precisely so that nothing left over is optional.
     pytest.fail("harness did not complete:\n" + combined)

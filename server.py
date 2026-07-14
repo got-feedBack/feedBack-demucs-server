@@ -83,6 +83,12 @@ CACHE_DIR = Path(os.environ.get(
     Path.home() / ".cache" / "slopsmith-demucs",
 ))
 MAX_CONCURRENT = 2
+
+# Whisper segments shorter than this are dropped before wav2vec2 alignment: the aligner tends to
+# return empty alignments for sub-frame windows, so passing them in degrades the output instead
+# of adding to it. Whisper emits them on breaths, noise and stem bleed. Shared by /align and
+# /transcribe — the two used to carry the same 0.2 independently, which is how they drift.
+_MIN_SEGMENT_SECONDS = 0.2
 CACHE_TTL = os.environ.get("CACHE_TTL", "24h")
 # Directories under CACHE_DIR that hold model weights (never auto-deleted).
 #
@@ -877,7 +883,7 @@ async def align_lyrics(
             # to produce empty alignments for sub-frame windows.
             speech_segments = [
                 s for s in raw_speech_segments
-                if float(s.get("end", 0.0)) - float(s.get("start", 0.0)) > 0.2
+                if float(s.get("end", 0.0)) - float(s.get("start", 0.0)) > _MIN_SEGMENT_SECONDS
             ]
 
             # Distribute user-text words across speech segments
@@ -1243,9 +1249,21 @@ async def transcribe_audio(
     mapper already consumes, so nothing downstream has to learn a new shape.
     """
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename or "audio.ogg").suffix)
-    content = await file.read()
-    tmp.write(content)
-    tmp.close()
+    # _do_transcribe() unlinks the temp file in its finally — but it only runs if we get that
+    # far. A client that disconnects mid-upload, or a full disk, raises HERE, and the handler
+    # exits leaving the file behind. One orphan is nothing; one per failed upload, on a server
+    # that runs for months, is a disk slowly filling with nothing.
+    try:
+        content = await file.read()
+        tmp.write(content)
+        tmp.close()
+    except Exception:
+        tmp.close()
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        raise
 
     def _do_transcribe():
         try:
@@ -1270,11 +1288,19 @@ async def transcribe_audio(
                 normalized_lang if normalized_lang
                 else (transcribed.get("language") or "en").lower()
             )
-            segments = transcribed.get("segments") or []
+            # Drop sub-frame segments before aligning, exactly as /align does (and for the same
+            # reason it documents): wav2vec2 tends to return empty alignments for windows this
+            # short, so feeding them in produces degraded output instead of no output. Whisper
+            # emits these on breaths, noise and stem bleed.
+            segments = [
+                s for s in (transcribed.get("segments") or [])
+                if float(s.get("end", 0.0)) - float(s.get("start", 0.0)) > _MIN_SEGMENT_SECONDS
+            ]
 
             # An instrumental track is not an error. A stem with no singing in it transcribes to
-            # nothing, and that is the correct answer — returning 400 would make the caller treat
-            # a successful "this song has no vocals" as a failed request.
+            # nothing (or to nothing but sub-frame noise), and that is the correct answer —
+            # returning 400 would make the caller treat a successful "this song has no vocals"
+            # as a failed request.
             if not segments:
                 return {"segments": [], "language": detected_lang}
 

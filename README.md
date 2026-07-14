@@ -377,7 +377,7 @@ Transcribe sung audio to word-level timed lyrics using WhisperX (faster-whisper 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `file` | Form (file) | Audio file (vocals stem) |
-| `language` | Form | ISO 639-1/2 language code hint, e.g. `en`, `es`, `pt` (optional, auto-detected). Must be 2–8 lowercase letters; subtags like `en-US` are not supported. |
+| `language` | Form | ISO 639-1/2 language code hint, e.g. `en`, `es`, `pt` (optional, auto-detected). Case-insensitive — the value is trimmed and lowercased before validation, so `EN` and `en` both work. Must then be 2–8 letters; subtags like `en-US` are rejected (400) because the hyphen is not a letter. |
 
 Returns native WhisperX alignment output:
 
@@ -397,7 +397,7 @@ Forced-align lyrics against audio using WhisperX (faster-whisper transcription +
 |-----------|------|-------------|
 | `file` | Form (file) | Audio file (vocals stem) |
 | `text` | Form | Plain text lyrics |
-| `language` | Form | ISO 639-1/2 language code hint, e.g. `en`, `es`, `pt` (optional, auto-detected). Must be 2–8 lowercase letters; subtags like `en-US` are not supported. |
+| `language` | Form | ISO 639-1/2 language code hint, e.g. `en`, `es`, `pt` (optional, auto-detected). Case-insensitive — the value is trimmed and lowercased before validation, so `EN` and `en` both work. Must then be 2–8 letters; subtags like `en-US` are rejected (400) because the hyphen is not a letter. |
 | `granularity` | Form | `line` (default), `word`, `syllable`, or `phoneme` |
 
 Granularity behaviour:
