@@ -133,8 +133,14 @@ def _client_safe_error(e: Exception, where: str) -> str:
     caller gets the exception type and message with absolute paths scrubbed. "CUDA out of memory"
     survives — it's the answer, and it isn't a secret. "/app/cache/models--foo/snapshots/…" does
     not.
+
+    The traceback is printed to stdout EXPLICITLY: traceback.print_exc() defaults to stderr,
+    which would split one error across two streams — the trace on stderr, the summary line below
+    on stdout — and under `docker logs` those interleave by arrival, so the two halves of the
+    same failure end up apart, next to unrelated lines. Everything else here logs with print(),
+    so this follows it.
     """
-    traceback.print_exc()
+    traceback.print_exc(file=sys.stdout)
     msg = str(e)
     # Named roots first, so the common cases read as themselves rather than as <path>.
     for secret, placeholder in (
