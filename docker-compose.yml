@@ -55,17 +55,17 @@ services:
       # The model feedBack splits with. Warmup only prefetches the DEFAULT model,
       # so setting this is what makes the first split fast rather than a cold
       # multi-GB download at the worst possible moment.
-      - SLOPSMITH_DEMUCS_MODEL=bs_roformer_sw
+      - FEEDBACK_DEMUCS_MODEL=bs_roformer_sw
       - SKIP_WARMUP=false
       # Cache cleanup TTL: auto-delete stems older than this (1h, 12h, 24h, NEVER)
       - CACHE_TTL=24h
       # Cache directories — redirect all model downloads to the
       # persistent volume so they survive container restarts:
-      - SLOPSMITH_DEMUCS_CACHE=/app/cache
+      - FEEDBACK_DEMUCS_CACHE=/app/cache
       - TORCH_HOME=/app/cache/torch
       - HF_HOME=/app/cache/huggingface
       - HUGGINGFACE_HUB_CACHE=/app/cache/huggingface/hub
-      # - SLOPSMITH_API_KEY=your-secret-key
+      # - FEEDBACK_API_KEY=your-secret-key
 
       # ── GPU (see below) ──
       # - NVIDIA_VISIBLE_DEVICES=all

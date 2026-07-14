@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# Slopsmith Demucs Server — Docker Entrypoint
+# feedBack Demucs Server — Docker Entrypoint
 # ============================================================
 # Starts the FastAPI server and an optional background auto-update
 # daemon that periodically checks the git remote for changes.
@@ -12,8 +12,8 @@
 #   UPDATE_TIME             — HH:MM to check for updates (default: 04:00)
 #   UPDATE_CHECK_INTERVAL   — Seconds between time checks (default: 3600)
 #   SKIP_WARMUP             — Pass --skip-warmup to server (default: false)
-#   SLOPSMITH_DEMUCS_MODEL  — Demucs model override
-#   SLOPSMITH_API_KEY       — API auth key
+#   FEEDBACK_DEMUCS_MODEL  — Demucs model override
+#   FEEDBACK_API_KEY       — API auth key
 # ============================================================
 
 set -euo pipefail
@@ -106,11 +106,11 @@ restart_loop() {
     if [ "${SKIP_WARMUP:-false}" = "true" ]; then
         CLI_ARGS+=("--skip-warmup")
     fi
-    if [ -n "${SLOPSMITH_DEMUCS_MODEL:-}" ]; then
-        CLI_ARGS+=("--model" "$SLOPSMITH_DEMUCS_MODEL")
+    if [ -n "${FEEDBACK_DEMUCS_MODEL:-}" ]; then
+        CLI_ARGS+=("--model" "$FEEDBACK_DEMUCS_MODEL")
     fi
-    if [ -n "${SLOPSMITH_API_KEY:-}" ]; then
-        CLI_ARGS+=("--api-key" "$SLOPSMITH_API_KEY")
+    if [ -n "${FEEDBACK_API_KEY:-}" ]; then
+        CLI_ARGS+=("--api-key" "$FEEDBACK_API_KEY")
     fi
 
     while true; do
@@ -145,7 +145,7 @@ restart_loop() {
 }
 
 # ── Start ───────────────────────────────────────────────────────────────
-echo "[entrypoint] Starting Slopsmith Demucs Server"
+echo "[entrypoint] Starting feedBack Demucs Server"
 echo "[entrypoint]   Port:           ${PORT:-7865}"
 echo "[entrypoint]   Host:           ${HOST:-0.0.0.0}"
 echo "[entrypoint]   Auto-update:    ${AUTO_UPDATE:-true}"

@@ -2,7 +2,7 @@
 
 ### Q: How is the API key transmitted on the wire?
 
-**A:** [OPEN] — `--api-key` and `SLOPSMITH_API_KEY` are accepted but
+**A:** [OPEN] — `--api-key` and `FEEDBACK_API_KEY` are accepted but
 the README and code comments do not document the request header. Most
 likely a custom `X-API-Key` header or `Authorization: Bearer <key>`;
 needs to be pinned and documented.
@@ -25,7 +25,7 @@ hash-lock around job creation.
 
 ### Q: What is the maximum upload size?
 
-**A:** [OPEN] — there is no explicit cap in `server.py`. The Slopsmith
+**A:** [OPEN] — there is no explicit cap in `server.py`. The feedBack
 side likely throws something reasonable in front of it, but as a
 standalone service the server should probably enforce its own ceiling.
 
@@ -47,9 +47,9 @@ request. Subsequent `/align en` calls trigger a reload, and
 ### Q: Where do the pre-baked Lyrics-Karaoke / Lyrics-Sync inputs in
 the demo come from?
 
-**A:** The demo (`slopsmith-demo`) bundles a `.sloppak` that already
+**A:** The demo (`feedBack-demo`) bundles a `.sloppak` that already
 contains `lyrics.json` + `vocal_pitch.json`. The demo Dockerfile does
-not run a Demucs server — see `slopsmith-demo/README.md` "What's
+not run a Demucs server — see `feedBack-demo/README.md` "What's
 blocked".
 
 ### Q: What test coverage exists?

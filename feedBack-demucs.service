@@ -1,0 +1,23 @@
+[Unit]
+Description=feedBack Demucs Separation Service
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+# Edit the paths below to match your clone location and Python venv.
+# Example:
+#   ExecStart=/home/$USER/Repositories/feedBack-demucs-server/.venv/bin/python /home/$USER/Repositories/feedBack-demucs-server/server.py --port 7865
+ExecStart=/PATH/TO/feedBack-demucs-server/.venv/bin/python /PATH/TO/feedBack-demucs-server/server.py --port 7865
+Restart=always
+RestartSec=5
+# Optional: set device to cpu if no GPU
+# Environment=FEEDBACK_DEMUCS_DEVICE=cpu
+# Optional: set default model
+# Environment=FEEDBACK_DEMUCS_MODEL=htdemucs_ft
+# Optional: enable API key auth
+# Environment=FEEDBACK_API_KEY=your-secret-key
+
+[Install]
+WantedBy=default.target
