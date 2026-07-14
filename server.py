@@ -1217,6 +1217,99 @@ async def align_lyrics(
     return result
 
 
+@app.post("/transcribe")
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    language: str = Form(""),
+):
+    """Transcribe sung audio to word-level timed lyrics. No lyrics supplied.
+
+    This is the endpoint feedBack's "transcribe" path always meant to call. It was calling
+    ``/align`` — forced alignment — whose ``text`` field is REQUIRED, so FastAPI rejected the
+    request with a 422 before the handler ever ran, every single time. Remote transcription had
+    therefore never worked at all (got-feedBack/feedBack-plugin-stem-splitter#17). The two
+    operations answer genuinely different questions and both are worth having:
+
+        /align      "here are the lyrics — when is each word sung?"   (needs text)
+        /transcribe "what are the lyrics, and when is each sung?"     (needs nothing but audio)
+
+    Whisper hears the words; wav2vec2 then force-aligns Whisper's own transcript to get word
+    timestamps far tighter than Whisper's segment boundaries. That second pass is why this isn't
+    just ``asr.transcribe()``: raw Whisper segments are line-ish and drift, and a karaoke chart
+    built from them sits visibly late.
+
+    Returns native ``whisperx.align()`` output — ``{"segments": [{start, end, text, words:
+    [{word, start, end, score}]}], "language": "en"}`` — which is exactly what the client's
+    mapper already consumes, so nothing downstream has to learn a new shape.
+    """
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename or "audio.ogg").suffix)
+    content = await file.read()
+    tmp.write(content)
+    tmp.close()
+
+    def _do_transcribe():
+        try:
+            audio = whisperx.load_audio(tmp.name)
+            if float(len(audio)) / 16000.0 <= 0:
+                return {"error": "audio is empty", "_http_status": 400}
+
+            asr_model = _get_whisperx_model()
+            transcribe_kwargs: dict = {"batch_size": 16}
+            normalized_lang = ""
+            if language:
+                normalized_lang = language.strip().lower()
+                if not re.fullmatch(r'[a-z]{2,8}', normalized_lang):
+                    raise ValueError(f"Invalid language code: {normalized_lang!r}")
+                transcribe_kwargs["language"] = normalized_lang
+
+            transcribed = asr_model.transcribe(audio, **transcribe_kwargs)
+            # The caller's hint wins: Whisper's auto-detection mis-classifies on short clips,
+            # instrumental intros and non-English vocals, and a wrong guess here loads the wrong
+            # wav2vec2 aligner — which fails obscurely rather than loudly.
+            detected_lang = (
+                normalized_lang if normalized_lang
+                else (transcribed.get("language") or "en").lower()
+            )
+            segments = transcribed.get("segments") or []
+
+            # An instrumental track is not an error. A stem with no singing in it transcribes to
+            # nothing, and that is the correct answer — returning 400 would make the caller treat
+            # a successful "this song has no vocals" as a failed request.
+            if not segments:
+                return {"segments": [], "language": detected_lang}
+
+            aligner_model, aligner_meta = _get_whisperx_aligner(detected_lang)
+            aligned = whisperx.align(
+                segments,
+                aligner_model,
+                aligner_meta,
+                audio,
+                _whisperx_device(),
+                return_char_alignments=False,
+            )
+            return {"segments": aligned.get("segments", []) or [], "language": detected_lang}
+        except ValueError as e:
+            # Client input problems (bad language code) — 400, so a caller can tell its own
+            # mistake from a server fault.
+            return {"error": str(e), "_http_status": 400}
+        except Exception as e:
+            return {"error": str(e)}
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+
+    import asyncio
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, _do_transcribe)
+
+    if "error" in result:
+        status = result.pop("_http_status", 500)
+        return JSONResponse(result, status)
+    return result
+
+
 # ── Per-syllable pitch extraction (CREPE) ───────────────────────────────
 #
 # /pitch returns one MIDI note per supplied syllable timing. The
