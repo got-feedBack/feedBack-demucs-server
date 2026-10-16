@@ -339,10 +339,12 @@ The CI workflow (`.github/workflows/docker-build.yml`) automatically builds the 
 docker pull ghcr.io/YOUR_GITHUB_USER/slopsmith-demucs-server:latest
 ```
 
-**Or from the upstream repo (once PR is merged):**
+**Or the image published from this repo:**
 ```bash
-docker pull ghcr.io/byrongamatos/slopsmith-demucs-server:latest
+docker pull ghcr.io/got-feedback/feedback-demucs-server:latest
 ```
+
+The image path is all lowercase because registry names must be lowercase. It matches the `image:` in `docker-compose.yml`.
 
 **Build directly from git (no clone needed):**
 ```bash
