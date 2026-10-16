@@ -124,7 +124,17 @@ Options:
 | `--api-key` | — | API key for authentication |
 | `--skip-warmup` | — | Skip startup model-weight prefetch |
 
-Environment variables override CLI defaults: `SLOPSMITH_DEMUCS_MODEL`, `SLOPSMITH_DEMUCS_DEVICE`, `SLOPSMITH_API_KEY`.
+Environment variables read by `server.py`. A CLI flag wins over the matching variable.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SLOPSMITH_DEMUCS_MODEL` | `htdemucs_ft` | Default separation model. `--model` overrides it. |
+| `SLOPSMITH_API_KEY` | (none) | When set, every request except `/health`, `/docs` and `/openapi.json` must send it in the `X-API-Key` header or the `api_key` query parameter. `--api-key` overrides it. |
+| `SLOPSMITH_DEMUCS_CACHE` | `~/.cache/slopsmith-demucs` (`/app/cache` in Docker) | Cache root for separated stems and Roformer weights. |
+| `SLOPSMITH_DEMUCS_CACHE_MAX_JOBS` | `10` | How many completed separation jobs stay cached. Older entries are deleted. Minimum `1`. |
+| `CACHE_TTL` | `24h` | Maximum age of stem cache entries. See [Cache cleanup](#cache-cleanup). |
+| `MODEL_IDLE_TIMEOUT` | `300` | Unload WhisperX and CREPE models after this much idle time. Plain seconds or a value with an `s`/`m`/`h`/`d` suffix. `NEVER` disables idle unloading. |
+| `SLOPSMITH_MAX_WHISPERX_ALIGNERS` | `4` | How many wav2vec2 aligners (one per language) stay loaded. The least recently used one is evicted. Minimum `1`. |
 
 ### First-start model weight download
 
@@ -280,6 +290,8 @@ The container can automatically check for repository updates and restart. **Disa
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `PORT` | `7865` | Port passed to `server.py --port` |
+| `HOST` | `0.0.0.0` | Address passed to `server.py --host` |
 | `AUTO_UPDATE` | `false` | Enable/disable auto-update |
 | `UPDATE_TIME` | `04:00` | Time of day to check (HH:MM, 24h) |
 | `UPDATE_CHECK_INTERVAL` | `3600` | Seconds between time checks (3600 = 1 hour) |
@@ -327,10 +339,12 @@ The CI workflow (`.github/workflows/docker-build.yml`) automatically builds the 
 docker pull ghcr.io/YOUR_GITHUB_USER/slopsmith-demucs-server:latest
 ```
 
-**Or from the upstream repo (once PR is merged):**
+**Or the image published from this repo:**
 ```bash
-docker pull ghcr.io/byrongamatos/slopsmith-demucs-server:latest
+docker pull ghcr.io/got-feedback/feedback-demucs-server:latest
 ```
+
+The image path is all lowercase because registry names must be lowercase. It matches the `image:` in `docker-compose.yml`.
 
 **Build directly from git (no clone needed):**
 ```bash
@@ -369,6 +383,18 @@ Separate audio into stems.
 | `file` | Upload | Audio file |
 | `stems` | Query | Comma-separated stem names (default: `drums,bass,vocals,other`) |
 | `model` | Query | Override model (optional) |
+
+### `POST /separate-url`
+
+Same as `POST /separate`, but the server downloads the audio itself.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `url` | JSON body | Audio URL, sent as `{"url": "https://..."}` |
+| `stems` | Query | Comma-separated stem names (default: `drums,bass,vocals,other`) |
+| `model` | Query | Override model (optional) |
+
+The cache key is a hash of the URL. Returns 400 when `url` is missing or the download fails.
 
 ### `POST /transcribe`
 
@@ -427,6 +453,10 @@ Download a separated stem by job ID.
 ### `GET /jobs` / `GET /jobs/{job_id}`
 
 List or inspect separation jobs.
+
+### `DELETE /cache/{job_id}`
+
+Delete one completed separation from the stem cache and forget its job. Returns `{"ok": true}`, or 400 for an invalid job ID.
 
 ### `WS /ws/jobs/{job_id}`
 
